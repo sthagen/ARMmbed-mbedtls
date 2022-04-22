@@ -99,12 +99,13 @@ set(src_tls
     net_sockets.c
     ssl_cache.c
     ssl_ciphersuites.c
-    ssl_cli.c
+    ssl_client.c
     ssl_cookie.c
     ssl_msg.c
-    ssl_srv.c
     ssl_ticket.c
     ssl_tls.c
+    ssl_tls12_client.c
+    ssl_tls12_server.c
     ssl_tls13_keys.c
     ssl_tls13_server.c
     ssl_tls13_client.c
@@ -157,10 +158,25 @@ if(GEN_FILES)
             ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/generate_ssl_debug_helpers.py
             ${error_headers}
     )
+
+    add_custom_command(
+        OUTPUT
+            ${CMAKE_CURRENT_BINARY_DIR}/psa_crypto_driver_wrappers.c
+        COMMAND
+            ${MBEDTLS_PYTHON_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/generate_driver_wrappers.py
+                ${CMAKE_CURRENT_BINARY_DIR}
+        DEPENDS
+            ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/generate_driver_wrappers.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/data_files/driver_templates/psa_crypto_driver_wrappers.c.jinja
+    )
+
+
 else()
     link_to_source(error.c)
     link_to_source(version_features.c)
     link_to_source(ssl_debug_helpers_generated.c)
+    link_to_source(psa_crypto_driver_wrappers.c)
 endif()
 
 if(CMAKE_COMPILER_IS_GNUCC)
@@ -244,6 +260,7 @@ if(USE_STATIC_MBEDTLS_LIBRARY)
 endif(USE_STATIC_MBEDTLS_LIBRARY)
 
 if(USE_SHARED_MBEDTLS_LIBRARY)
+    set(CMAKE_LIBRARY_PATH ${CMAKE_CURRENT_BINARY_DIR})
     add_library(${mbedcrypto_target} SHARED ${src_crypto})
     set_target_properties(${mbedcrypto_target} PROPERTIES VERSION 3.1.0 SOVERSION 11)
     target_link_libraries(${mbedcrypto_target} PUBLIC ${libs})

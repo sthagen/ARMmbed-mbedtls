@@ -52,14 +52,12 @@
 #endif
 
 #if !defined(MBEDTLS_NET_C) ||                              \
-    !defined(MBEDTLS_SSL_TLS_C) ||                          \
-    defined(MBEDTLS_PSA_CRYPTO_KEY_ID_ENCODES_OWNER)
-#define MBEDTLS_SSL_TEST_IMPOSSIBLE                             \
-    "MBEDTLS_NET_C and/or "                                     \
-    "MBEDTLS_SSL_TLS_C not defined, "                           \
-    "and/or MBEDTLS_PSA_CRYPTO_KEY_ID_ENCODES_OWNER defined.\n"
+    !defined(MBEDTLS_SSL_TLS_C)
+#define MBEDTLS_SSL_TEST_IMPOSSIBLE                         \
+    "MBEDTLS_NET_C and/or "                                 \
+    "MBEDTLS_SSL_TLS_C not defined."
 #elif !defined(HAVE_RNG)
-#define MBEDTLS_SSL_TEST_IMPOSSIBLE             \
+#define MBEDTLS_SSL_TEST_IMPOSSIBLE                         \
     "No random generator is available.\n"
 #else
 #undef MBEDTLS_SSL_TEST_IMPOSSIBLE
@@ -72,6 +70,7 @@
 
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/ssl.h"
+#include "mbedtls/ssl_ciphersuites.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/hmac_drbg.h"
@@ -130,9 +129,11 @@ void my_debug( void *ctx, int level,
                const char *file, int line,
                const char *str );
 
+#if defined(MBEDTLS_HAVE_TIME)
 mbedtls_time_t dummy_constant_time( mbedtls_time_t* time );
+#endif
 
-#if defined(MBEDTLS_USE_PSA_CRYPTO)
+#if defined(MBEDTLS_USE_PSA_CRYPTO) && !defined(MBEDTLS_TEST_USE_PSA_CRYPTO_RNG)
 /* If MBEDTLS_TEST_USE_PSA_CRYPTO_RNG is defined, the SSL test programs will use
  * mbedtls_psa_get_random() rather than entropy+DRBG as a random generator.
  *

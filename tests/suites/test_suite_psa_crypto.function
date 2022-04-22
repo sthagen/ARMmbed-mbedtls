@@ -54,7 +54,7 @@ static int mem_is_char( void *buffer, unsigned char c, size_t size )
     }
     return( 1 );
 }
-
+#if defined(MBEDTLS_ASN1_WRITE_C)
 /* Write the ASN.1 INTEGER with the value 2^(bits-1)+x backwards from *p. */
 static int asn1_write_10x( unsigned char **p,
                            unsigned char *start,
@@ -138,6 +138,7 @@ static int construct_fake_rsa_key( unsigned char *buffer,
     }
     return( len );
 }
+#endif /* MBEDTLS_ASN1_WRITE_C */
 
 int exercise_mac_setup( psa_key_type_t key_type,
                         const unsigned char *key_bytes,
@@ -506,7 +507,7 @@ static int aead_multipart_internal_func( int key_type_arg, data_t *key_data,
 
             if( output_data && output_part_length )
             {
-                memcpy( ( output_data + part_offset ), part_data,
+                memcpy( ( output_data + output_length ), part_data,
                         output_part_length );
             }
 
@@ -583,6 +584,122 @@ exit:
     mbedtls_free( output_data );
     mbedtls_free( part_data );
     mbedtls_free( final_data );
+    PSA_DONE( );
+
+    return( test_ok );
+}
+
+/*!
+ * \brief                           Internal Function for MAC multipart tests.
+ * \param key_type_arg              Type of key passed in
+ * \param key_data                  The encryption / decryption key data
+ * \param alg_arg                   The type of algorithm used
+ * \param input_data                Data to encrypt / decrypt
+ * \param data_part_len_arg         If not -1, the length of chunks to feed
+ *                                  the data in to be encrypted / decrypted. If
+ *                                  -1, no chunking
+ * \param expected_output           Expected output
+ * \param is_verify                 If non-zero this is an verify operation.
+ * \param do_zero_parts             If non-zero, interleave zero length chunks
+ *                                  with normal length chunks.
+ * \return int                      Zero on failure, non-zero on success.
+ */
+static int mac_multipart_internal_func( int key_type_arg, data_t *key_data,
+                                        int alg_arg,
+                                        data_t *input_data,
+                                        int data_part_len_arg,
+                                        data_t *expected_output,
+                                        int is_verify,
+                                        int do_zero_parts )
+{
+    mbedtls_svc_key_id_t key = MBEDTLS_SVC_KEY_ID_INIT;
+    psa_key_type_t key_type = key_type_arg;
+    psa_algorithm_t alg = alg_arg;
+    psa_mac_operation_t operation = PSA_MAC_OPERATION_INIT;
+    unsigned char mac[PSA_MAC_MAX_SIZE];
+    size_t part_offset = 0;
+    size_t part_length = 0;
+    size_t data_part_len = 0;
+    size_t mac_len = 0;
+    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    psa_status_t status = PSA_ERROR_GENERIC_ERROR;
+
+    int test_ok = 0;
+    size_t part_count = 0;
+
+    PSA_INIT( );
+
+    if( is_verify )
+        psa_set_key_usage_flags( &attributes, PSA_KEY_USAGE_VERIFY_HASH );
+    else
+        psa_set_key_usage_flags( &attributes, PSA_KEY_USAGE_SIGN_HASH );
+
+    psa_set_key_algorithm( &attributes, alg );
+    psa_set_key_type( &attributes, key_type );
+
+    PSA_ASSERT( psa_import_key( &attributes, key_data->x, key_data->len,
+                                &key ) );
+
+    if( is_verify )
+        status = psa_mac_verify_setup( &operation, key, alg );
+    else
+        status = psa_mac_sign_setup( &operation, key, alg );
+
+    PSA_ASSERT( status );
+
+    if( data_part_len_arg != -1 )
+    {
+        /* Pass data in parts */
+        data_part_len = ( size_t ) data_part_len_arg;
+
+        for( part_offset = 0, part_count = 0;
+             part_offset < input_data->len;
+             part_offset += part_length, part_count++ )
+        {
+            if( do_zero_parts && ( part_count & 0x01 ) )
+            {
+                part_length = 0;
+            }
+            else if( ( input_data->len - part_offset ) < data_part_len )
+            {
+                part_length = ( input_data->len - part_offset );
+            }
+            else
+            {
+                part_length = data_part_len;
+            }
+
+            PSA_ASSERT( psa_mac_update( &operation,
+                                        ( input_data->x + part_offset ),
+                                        part_length ) );
+        }
+    }
+    else
+    {
+        /* Pass all data in one go. */
+        PSA_ASSERT( psa_mac_update( &operation, input_data->x,
+                                    input_data->len ) );
+    }
+
+    if( is_verify )
+    {
+        PSA_ASSERT( psa_mac_verify_finish( &operation, expected_output->x,
+                                           expected_output->len ) );
+    }
+    else
+    {
+        PSA_ASSERT( psa_mac_sign_finish( &operation, mac,
+                                         PSA_MAC_MAX_SIZE, &mac_len ) );
+
+        ASSERT_COMPARE( expected_output->x, expected_output->len,
+                        mac, mac_len );
+    }
+
+    test_ok = 1;
+
+exit:
+    psa_destroy_key( key );
+    psa_mac_abort( &operation );
     PSA_DONE( );
 
     return( test_ok );
@@ -758,7 +875,7 @@ exit:
 }
 /* END_CASE */
 
-/* BEGIN_CASE */
+/* BEGIN_CASE depends_on:MBEDTLS_ASN1_WRITE_C */
 void import_rsa_made_up( int bits_arg, int keypair, int expected_status_arg )
 {
     mbedtls_svc_key_id_t key = MBEDTLS_SVC_KEY_ID_INIT;
@@ -1154,6 +1271,25 @@ void mac_key_policy( int policy_usage_arg,
                                  mac, PSA_MAC_MAX_SIZE, &mac_len ),
                 expected_status_sign );
 
+    /* Calculate the MAC, multi-part case. */
+    PSA_ASSERT( psa_mac_abort( &operation ) );
+    status = psa_mac_sign_setup( &operation, key, exercise_alg );
+    if( status == PSA_SUCCESS )
+    {
+        status = psa_mac_update( &operation, input, 128 );
+        if( status == PSA_SUCCESS )
+            TEST_EQUAL( psa_mac_sign_finish( &operation, mac, PSA_MAC_MAX_SIZE,
+                                             &mac_len ),
+                        expected_status_sign );
+        else
+            TEST_EQUAL( status, expected_status_sign );
+    }
+    else
+    {
+        TEST_EQUAL( status, expected_status_sign );
+    }
+    PSA_ASSERT( psa_mac_abort( &operation ) );
+
     /* Verify correct MAC, one-shot case. */
     status = psa_mac_verify( key, exercise_alg, input, 128,
                                 mac, mac_len );
@@ -1162,6 +1298,29 @@ void mac_key_policy( int policy_usage_arg,
         TEST_EQUAL( status, PSA_ERROR_INVALID_SIGNATURE );
     else
         TEST_EQUAL( status, expected_status_verify );
+
+    /* Verify correct MAC, multi-part case. */
+    status = psa_mac_verify_setup( &operation, key, exercise_alg );
+    if( status == PSA_SUCCESS )
+    {
+        status = psa_mac_update( &operation, input, 128 );
+        if( status == PSA_SUCCESS )
+        {
+            status = psa_mac_verify_finish( &operation, mac, mac_len );
+            if( expected_status_sign != PSA_SUCCESS && expected_status_verify == PSA_SUCCESS )
+                TEST_EQUAL( status, PSA_ERROR_INVALID_SIGNATURE );
+            else
+                TEST_EQUAL( status, expected_status_verify );
+        }
+        else
+        {
+            TEST_EQUAL( status, expected_status_verify );
+        }
+    }
+    else
+    {
+        TEST_EQUAL( status, expected_status_verify );
+    }
 
     psa_mac_abort( &operation );
 
@@ -1187,7 +1346,19 @@ void cipher_key_policy( int policy_usage_arg,
     psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
     psa_cipher_operation_t operation = PSA_CIPHER_OPERATION_INIT;
     psa_key_usage_t policy_usage = policy_usage_arg;
+    size_t output_buffer_size = 0;
+    size_t input_buffer_size = 0;
+    size_t output_length = 0;
+    uint8_t *output = NULL;
+    uint8_t *input = NULL;
     psa_status_t status;
+
+    input_buffer_size = PSA_BLOCK_CIPHER_BLOCK_LENGTH( exercise_alg );
+    output_buffer_size = PSA_CIPHER_ENCRYPT_OUTPUT_SIZE( key_type, exercise_alg,
+                                                         input_buffer_size );
+
+    ASSERT_ALLOC( input, input_buffer_size );
+    ASSERT_ALLOC( output, output_buffer_size );
 
     PSA_ASSERT( psa_crypto_init( ) );
 
@@ -1202,6 +1373,17 @@ void cipher_key_policy( int policy_usage_arg,
     TEST_EQUAL( policy_usage,
                 mbedtls_test_update_key_usage_flags( policy_usage ) );
 
+    /* Encrypt check, one-shot */
+    status = psa_cipher_encrypt( key, exercise_alg, input, input_buffer_size,
+                                 output, output_buffer_size,
+                                 &output_length);
+    if( policy_alg == exercise_alg &&
+        ( policy_usage & PSA_KEY_USAGE_ENCRYPT ) != 0 )
+        PSA_ASSERT( status );
+    else
+        TEST_EQUAL( status, PSA_ERROR_NOT_PERMITTED );
+
+    /* Encrypt check, multi-part */
     status = psa_cipher_encrypt_setup( &operation, key, exercise_alg );
     if( policy_alg == exercise_alg &&
         ( policy_usage & PSA_KEY_USAGE_ENCRYPT ) != 0 )
@@ -1210,6 +1392,17 @@ void cipher_key_policy( int policy_usage_arg,
         TEST_EQUAL( status, PSA_ERROR_NOT_PERMITTED );
     psa_cipher_abort( &operation );
 
+    /* Decrypt check, one-shot */
+    status = psa_cipher_decrypt( key, exercise_alg, output, output_buffer_size,
+                                 input, input_buffer_size,
+                                 &output_length);
+    if( policy_alg == exercise_alg &&
+        ( policy_usage & PSA_KEY_USAGE_DECRYPT ) != 0 )
+        PSA_ASSERT( status );
+    else
+        TEST_EQUAL( status, PSA_ERROR_NOT_PERMITTED );
+
+    /* Decrypt check, multi-part */
     status = psa_cipher_decrypt_setup( &operation, key, exercise_alg );
     if( policy_alg == exercise_alg &&
         ( policy_usage & PSA_KEY_USAGE_DECRYPT ) != 0 )
@@ -1219,6 +1412,8 @@ void cipher_key_policy( int policy_usage_arg,
 
 exit:
     psa_cipher_abort( &operation );
+    mbedtls_free( input );
+    mbedtls_free( output );
     psa_destroy_key( key );
     PSA_DONE( );
 }
@@ -1236,6 +1431,7 @@ void aead_key_policy( int policy_usage_arg,
 {
     mbedtls_svc_key_id_t key = MBEDTLS_SVC_KEY_ID_INIT;
     psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    psa_aead_operation_t operation = PSA_AEAD_OPERATION_INIT;
     psa_key_usage_t policy_usage = policy_usage_arg;
     psa_status_t status;
     psa_status_t expected_status = expected_status_arg;
@@ -1261,6 +1457,7 @@ void aead_key_policy( int policy_usage_arg,
     TEST_EQUAL( policy_usage,
                 mbedtls_test_update_key_usage_flags( policy_usage ) );
 
+    /* Encrypt check, one-shot */
     status = psa_aead_encrypt( key, exercise_alg,
                                nonce, nonce_length,
                                NULL, 0,
@@ -1272,6 +1469,14 @@ void aead_key_policy( int policy_usage_arg,
     else
         TEST_EQUAL( status, PSA_ERROR_NOT_PERMITTED );
 
+    /* Encrypt check, multi-part */
+    status = psa_aead_encrypt_setup( &operation, key, exercise_alg );
+    if( ( policy_usage & PSA_KEY_USAGE_ENCRYPT ) != 0 )
+        TEST_EQUAL( status, expected_status );
+    else
+        TEST_EQUAL( status, PSA_ERROR_NOT_PERMITTED );
+
+    /* Decrypt check, one-shot */
     memset( tag, 0, sizeof( tag ) );
     status = psa_aead_decrypt( key, exercise_alg,
                                nonce, nonce_length,
@@ -1286,7 +1491,16 @@ void aead_key_policy( int policy_usage_arg,
     else
         TEST_EQUAL( status, expected_status );
 
+    /* Decrypt check, multi-part */
+    PSA_ASSERT( psa_aead_abort( &operation ) );
+    status = psa_aead_decrypt_setup( &operation, key, exercise_alg );
+    if( ( policy_usage & PSA_KEY_USAGE_DECRYPT ) == 0 )
+        TEST_EQUAL( status, PSA_ERROR_NOT_PERMITTED );
+    else
+        TEST_EQUAL( status, expected_status );
+
 exit:
+    PSA_ASSERT( psa_aead_abort( &operation ) );
     psa_destroy_key( key );
     PSA_DONE( );
 }
@@ -1802,12 +2016,24 @@ void hash_setup( int alg_arg,
                  int expected_status_arg )
 {
     psa_algorithm_t alg = alg_arg;
+    uint8_t *output = NULL;
+    size_t output_size = 0;
+    size_t output_length = 0;
     psa_status_t expected_status = expected_status_arg;
     psa_hash_operation_t operation = PSA_HASH_OPERATION_INIT;
     psa_status_t status;
 
     PSA_ASSERT( psa_crypto_init( ) );
 
+    /* Hash Setup, one-shot */
+    output_size = PSA_HASH_LENGTH( alg );
+    ASSERT_ALLOC( output, output_size );
+
+    status = psa_hash_compute( alg, NULL, 0,
+                               output, output_size, &output_length );
+    TEST_EQUAL( status, expected_status );
+
+    /* Hash Setup, multi-part */
     status = psa_hash_setup( &operation, alg );
     TEST_EQUAL( status, expected_status );
 
@@ -1826,6 +2052,7 @@ void hash_setup( int alg_arg,
 #endif
 
 exit:
+    mbedtls_free( output );
     PSA_DONE( );
 }
 /* END_CASE */
@@ -1838,6 +2065,7 @@ void hash_compute_fail( int alg_arg, data_t *input,
     uint8_t *output = NULL;
     size_t output_size = output_size_arg;
     size_t output_length = INVALID_EXPORT_LENGTH;
+    psa_hash_operation_t operation = PSA_HASH_OPERATION_INIT;
     psa_status_t expected_status = expected_status_arg;
     psa_status_t status;
 
@@ -1845,12 +2073,38 @@ void hash_compute_fail( int alg_arg, data_t *input,
 
     PSA_ASSERT( psa_crypto_init( ) );
 
+    /* Hash Compute, one-shot */
     status = psa_hash_compute( alg, input->x, input->len,
                                output, output_size, &output_length );
     TEST_EQUAL( status, expected_status );
     TEST_ASSERT( output_length <= output_size );
 
+    /* Hash Compute, multi-part */
+    status = psa_hash_setup( &operation, alg );
+    if( status == PSA_SUCCESS )
+    {
+        status = psa_hash_update( &operation, input->x, input->len );
+        if( status == PSA_SUCCESS )
+        {
+            status = psa_hash_finish( &operation, output, output_size,
+                                      &output_length );
+            if( status == PSA_SUCCESS )
+                TEST_ASSERT( output_length <= output_size );
+            else
+                TEST_EQUAL( status, expected_status );
+        }
+        else
+        {
+            TEST_EQUAL( status, expected_status );
+        }
+    }
+    else
+    {
+        TEST_EQUAL( status, expected_status );
+    }
+
 exit:
+    PSA_ASSERT( psa_hash_abort( &operation ) );
     mbedtls_free( output );
     PSA_DONE( );
 }
@@ -1863,15 +2117,39 @@ void hash_compare_fail( int alg_arg, data_t *input,
 {
     psa_algorithm_t alg = alg_arg;
     psa_status_t expected_status = expected_status_arg;
+    psa_hash_operation_t operation = PSA_HASH_OPERATION_INIT;
     psa_status_t status;
 
     PSA_ASSERT( psa_crypto_init( ) );
 
+    /* Hash Compare, one-shot */
     status = psa_hash_compare( alg, input->x, input->len,
                                reference_hash->x, reference_hash->len );
     TEST_EQUAL( status, expected_status );
 
+    /* Hash Compare, multi-part */
+    status = psa_hash_setup( &operation, alg );
+    if( status == PSA_SUCCESS )
+    {
+        status = psa_hash_update( &operation, input->x, input->len );
+        if( status == PSA_SUCCESS )
+        {
+            status = psa_hash_verify( &operation, reference_hash->x,
+                                      reference_hash->len );
+            TEST_EQUAL( status, expected_status );
+        }
+        else
+        {
+            TEST_EQUAL( status, expected_status );
+        }
+    }
+    else
+    {
+        TEST_EQUAL( status, expected_status );
+    }
+
 exit:
+    PSA_ASSERT( psa_hash_abort( &operation ) );
     PSA_DONE( );
 }
 /* END_CASE */
@@ -1883,11 +2161,12 @@ void hash_compute_compare( int alg_arg, data_t *input,
     psa_algorithm_t alg = alg_arg;
     uint8_t output[PSA_HASH_MAX_SIZE + 1];
     size_t output_length = INVALID_EXPORT_LENGTH;
+    psa_hash_operation_t operation = PSA_HASH_OPERATION_INIT;
     size_t i;
 
     PSA_ASSERT( psa_crypto_init( ) );
 
-    /* Compute with tight buffer */
+    /* Compute with tight buffer, one-shot */
     PSA_ASSERT( psa_hash_compute( alg, input->x, input->len,
                                   output, PSA_HASH_LENGTH( alg ),
                                   &output_length ) );
@@ -1895,7 +2174,17 @@ void hash_compute_compare( int alg_arg, data_t *input,
     ASSERT_COMPARE( output, output_length,
                     expected_output->x, expected_output->len );
 
-    /* Compute with larger buffer */
+    /* Compute with tight buffer, multi-part */
+    PSA_ASSERT( psa_hash_setup( &operation, alg ) );
+    PSA_ASSERT( psa_hash_update( &operation, input->x, input->len ) );
+    PSA_ASSERT( psa_hash_finish( &operation, output,
+                                 PSA_HASH_LENGTH( alg ),
+                                 &output_length ) );
+    TEST_EQUAL( output_length, PSA_HASH_LENGTH( alg ) );
+    ASSERT_COMPARE( output, output_length,
+                    expected_output->x, expected_output->len );
+
+    /* Compute with larger buffer, one-shot */
     PSA_ASSERT( psa_hash_compute( alg, input->x, input->len,
                                   output, sizeof( output ),
                                   &output_length ) );
@@ -1903,18 +2192,45 @@ void hash_compute_compare( int alg_arg, data_t *input,
     ASSERT_COMPARE( output, output_length,
                     expected_output->x, expected_output->len );
 
-    /* Compare with correct hash */
+    /* Compute with larger buffer, multi-part */
+    PSA_ASSERT( psa_hash_setup( &operation, alg ) );
+    PSA_ASSERT( psa_hash_update( &operation, input->x, input->len ) );
+    PSA_ASSERT( psa_hash_finish( &operation, output,
+                                 sizeof( output ), &output_length ) );
+    TEST_EQUAL( output_length, PSA_HASH_LENGTH( alg ) );
+    ASSERT_COMPARE( output, output_length,
+                    expected_output->x, expected_output->len );
+
+    /* Compare with correct hash, one-shot */
     PSA_ASSERT( psa_hash_compare( alg, input->x, input->len,
                                   output, output_length ) );
 
-    /* Compare with trailing garbage */
+    /* Compare with correct hash, multi-part */
+    PSA_ASSERT( psa_hash_setup( &operation, alg ) );
+    PSA_ASSERT( psa_hash_update( &operation, input->x, input->len ) );
+    PSA_ASSERT( psa_hash_verify( &operation, output,
+                output_length ) );
+
+    /* Compare with trailing garbage, one-shot */
     TEST_EQUAL( psa_hash_compare( alg, input->x, input->len,
                                   output, output_length + 1 ),
                 PSA_ERROR_INVALID_SIGNATURE );
 
-    /* Compare with truncated hash */
+    /* Compare with trailing garbage, multi-part */
+    PSA_ASSERT( psa_hash_setup( &operation, alg ) );
+    PSA_ASSERT( psa_hash_update( &operation, input->x, input->len ) );
+    TEST_EQUAL( psa_hash_verify( &operation, output, output_length + 1 ),
+                PSA_ERROR_INVALID_SIGNATURE );
+
+    /* Compare with truncated hash, one-shot */
     TEST_EQUAL( psa_hash_compare( alg, input->x, input->len,
                                   output, output_length - 1 ),
+                PSA_ERROR_INVALID_SIGNATURE );
+
+    /* Compare with truncated hash, multi-part */
+    PSA_ASSERT( psa_hash_setup( &operation, alg ) );
+    PSA_ASSERT( psa_hash_update( &operation, input->x, input->len ) );
+    TEST_EQUAL( psa_hash_verify( &operation, output, output_length - 1 ),
                 PSA_ERROR_INVALID_SIGNATURE );
 
     /* Compare with corrupted value */
@@ -1922,13 +2238,23 @@ void hash_compute_compare( int alg_arg, data_t *input,
     {
         mbedtls_test_set_step( i );
         output[i] ^= 1;
+
+        /* One-shot */
         TEST_EQUAL( psa_hash_compare( alg, input->x, input->len,
                                       output, output_length ),
                     PSA_ERROR_INVALID_SIGNATURE );
+
+        /* Multi-Part */
+        PSA_ASSERT( psa_hash_setup( &operation, alg ) );
+        PSA_ASSERT( psa_hash_update( &operation, input->x, input->len ) );
+        TEST_EQUAL( psa_hash_verify( &operation, output, output_length ),
+                    PSA_ERROR_INVALID_SIGNATURE );
+
         output[i] ^= 1;
     }
 
 exit:
+    PSA_ASSERT( psa_hash_abort( &operation ) );
     PSA_DONE( );
 }
 /* END_CASE */
@@ -2377,6 +2703,45 @@ void mac_bad_order( )
 
 exit:
     PSA_DONE( );
+}
+/* END_CASE */
+
+/* BEGIN_CASE */
+void mac_sign_verify_multi( int key_type_arg,
+                            data_t *key_data,
+                            int alg_arg,
+                            data_t *input,
+                            int is_verify,
+                            data_t *expected_mac )
+{
+    size_t data_part_len = 0;
+
+    for( data_part_len = 1; data_part_len <= input->len; data_part_len++ )
+    {
+        /* Split data into length(data_part_len) parts. */
+        mbedtls_test_set_step( 2000 + data_part_len );
+
+        if( mac_multipart_internal_func( key_type_arg, key_data,
+                                         alg_arg,
+                                         input, data_part_len,
+                                         expected_mac,
+                                         is_verify, 0 ) == 0 )
+            break;
+
+        /* length(0) part, length(data_part_len) part, length(0) part... */
+        mbedtls_test_set_step( 3000 + data_part_len );
+
+        if( mac_multipart_internal_func( key_type_arg, key_data,
+                                         alg_arg,
+                                         input, data_part_len,
+                                         expected_mac,
+                                         is_verify, 1 ) == 0 )
+            break;
+    }
+
+    /* Goto is required to silence warnings about unused labels, as we
+     * don't actually do any test assertions in this function. */
+    goto exit;
 }
 /* END_CASE */
 
@@ -2830,9 +3195,14 @@ void cipher_encrypt_fail( int alg_arg,
     psa_key_type_t key_type = key_type_arg;
     psa_algorithm_t alg = alg_arg;
     psa_status_t expected_status = expected_status_arg;
+    unsigned char iv[PSA_CIPHER_IV_MAX_SIZE] = {0};
+    size_t iv_size = PSA_CIPHER_IV_MAX_SIZE;
+    size_t iv_length = 0;
     unsigned char *output = NULL;
     size_t output_buffer_size = 0;
     size_t output_length = 0;
+    size_t function_output_length;
+    psa_cipher_operation_t operation = PSA_CIPHER_OPERATION_INIT;
     psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
 
     if ( PSA_ERROR_BAD_STATE != expected_status )
@@ -2851,12 +3221,48 @@ void cipher_encrypt_fail( int alg_arg,
                                     &key ) );
     }
 
+    /* Encrypt, one-shot */
     status = psa_cipher_encrypt( key, alg, input->x, input->len, output,
                                  output_buffer_size, &output_length );
 
     TEST_EQUAL( status, expected_status );
 
+    /* Encrypt, multi-part */
+    status = psa_cipher_encrypt_setup( &operation, key, alg );
+    if( status == PSA_SUCCESS )
+    {
+        if( alg != PSA_ALG_ECB_NO_PADDING )
+        {
+            PSA_ASSERT( psa_cipher_generate_iv( &operation,
+                        iv, iv_size,
+                        &iv_length ) );
+        }
+
+        status = psa_cipher_update( &operation, input->x, input->len,
+                                    output, output_buffer_size,
+                                    &function_output_length );
+        if( status == PSA_SUCCESS )
+        {
+            output_length += function_output_length;
+
+            status = psa_cipher_finish( &operation, output + output_length,
+                                        output_buffer_size - output_length,
+                                        &function_output_length );
+
+            TEST_EQUAL( status, expected_status );
+        }
+        else
+        {
+            TEST_EQUAL( status, expected_status );
+        }
+    }
+    else
+    {
+        TEST_EQUAL( status, expected_status );
+    }
+
 exit:
+    psa_cipher_abort( &operation );
     mbedtls_free( output );
     psa_destroy_key( key );
     PSA_DONE( );
@@ -2935,6 +3341,7 @@ void cipher_encrypt_alg_without_iv( int alg_arg,
                                         &iv_length ),
                 PSA_ERROR_BAD_STATE );
 
+    /* Encrypt, one-shot */
     PSA_ASSERT( psa_cipher_encrypt( key, alg, input->x, input->len, output,
                                     output_buffer_size, &output_length ) );
     TEST_ASSERT( output_length <=
@@ -2944,7 +3351,24 @@ void cipher_encrypt_alg_without_iv( int alg_arg,
 
     ASSERT_COMPARE( expected_output->x, expected_output->len,
                     output, output_length );
+
+    /* Encrypt, multi-part */
+    PSA_ASSERT( psa_cipher_abort( &operation ) );
+    PSA_ASSERT( psa_cipher_encrypt_setup( &operation, key, alg ) );
+
+    PSA_ASSERT( psa_cipher_update( &operation, input->x, input->len,
+                                   output, output_buffer_size,
+                                   &output_length) );
+    TEST_ASSERT( output_length <=
+                 PSA_CIPHER_ENCRYPT_OUTPUT_SIZE( key_type, alg, input->len ) );
+    TEST_ASSERT( output_length <=
+                 PSA_CIPHER_ENCRYPT_OUTPUT_MAX_SIZE( input->len ) );
+
+    ASSERT_COMPARE( expected_output->x, expected_output->len,
+                    output, output_length );
+
 exit:
+    PSA_ASSERT( psa_cipher_abort( &operation ) );
     mbedtls_free( output );
     psa_destroy_key( key );
     PSA_DONE( );
@@ -3292,8 +3716,11 @@ void cipher_decrypt_fail( int alg_arg,
     unsigned char *input = NULL;
     size_t input_buffer_size = 0;
     unsigned char *output = NULL;
+    unsigned char *output_multi = NULL;
     size_t output_buffer_size = 0;
     size_t output_length = 0;
+    size_t function_output_length;
+    psa_cipher_operation_t operation = PSA_CIPHER_OPERATION_INIT;
     psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
 
     if ( PSA_ERROR_BAD_STATE != expected_status )
@@ -3320,13 +3747,65 @@ void cipher_decrypt_fail( int alg_arg,
     output_buffer_size = PSA_CIPHER_DECRYPT_OUTPUT_SIZE( key_type, alg, input_buffer_size );
     ASSERT_ALLOC( output, output_buffer_size );
 
+    /* Decrypt, one-short */
     status = psa_cipher_decrypt( key, alg, input, input_buffer_size, output,
                                  output_buffer_size, &output_length );
     TEST_EQUAL( status, expected_status );
 
+    /* Decrypt, multi-part */
+    status = psa_cipher_decrypt_setup( &operation, key, alg );
+    if( status == PSA_SUCCESS )
+    {
+        output_buffer_size = PSA_CIPHER_UPDATE_OUTPUT_SIZE( key_type, alg,
+                                                            input_arg->len ) +
+                             PSA_CIPHER_FINISH_OUTPUT_SIZE( key_type, alg );
+        ASSERT_ALLOC( output_multi, output_buffer_size );
+
+        if( iv->len > 0 )
+        {
+            status = psa_cipher_set_iv( &operation, iv->x, iv->len );
+
+            if( status != PSA_SUCCESS )
+                TEST_EQUAL( status, expected_status );
+        }
+
+        if( status == PSA_SUCCESS )
+        {
+            status = psa_cipher_update( &operation,
+                                        input_arg->x, input_arg->len,
+                                        output_multi, output_buffer_size,
+                                        &function_output_length );
+            if( status == PSA_SUCCESS )
+            {
+                output_length = function_output_length;
+
+                status = psa_cipher_finish( &operation,
+                                            output_multi + output_length,
+                                            output_buffer_size - output_length,
+                                            &function_output_length );
+
+                TEST_EQUAL( status, expected_status );
+            }
+            else
+            {
+                TEST_EQUAL( status, expected_status );
+            }
+        }
+        else
+        {
+            TEST_EQUAL( status, expected_status );
+        }
+    }
+    else
+    {
+        TEST_EQUAL( status, expected_status );
+    }
+
 exit:
+    psa_cipher_abort( &operation );
     mbedtls_free( input );
     mbedtls_free( output );
+    mbedtls_free( output_multi );
     psa_destroy_key( key );
     PSA_DONE( );
 }
@@ -4117,6 +4596,7 @@ exit:
 void aead_multipart_set_nonce( int key_type_arg, data_t *key_data,
                                int alg_arg,
                                int nonce_length_arg,
+                               int set_lengths_method_arg,
                                data_t *additional_data,
                                data_t *input_data,
                                int expected_status_arg )
@@ -4139,6 +4619,7 @@ void aead_multipart_set_nonce( int key_type_arg, data_t *key_data,
     size_t tag_length = 0;
     uint8_t tag_buffer[PSA_AEAD_TAG_MAX_SIZE];
     size_t index = 0;
+    set_lengths_method_t set_lengths_method = set_lengths_method_arg;
 
     PSA_ASSERT( psa_crypto_init( ) );
 
@@ -4196,26 +4677,40 @@ void aead_multipart_set_nonce( int key_type_arg, data_t *key_data,
         }
     }
 
+    if( set_lengths_method == SET_LENGTHS_BEFORE_NONCE )
+    {
+        PSA_ASSERT( psa_aead_set_lengths( &operation, additional_data->len,
+                                          input_data->len ) );
+    }
+
     status = psa_aead_set_nonce( &operation, nonce_buffer, nonce_length );
 
     TEST_EQUAL( status, expected_status );
 
     if( expected_status == PSA_SUCCESS )
     {
-        /* Ensure we can still complete operation. */
-        PSA_ASSERT( psa_aead_set_lengths( &operation, additional_data->len,
-                                          input_data->len ) );
+        if( set_lengths_method == SET_LENGTHS_AFTER_NONCE )
+        {
+            PSA_ASSERT( psa_aead_set_lengths( &operation, additional_data->len,
+                                              input_data->len ) );
+        }
+        if( operation.alg == PSA_ALG_CCM && set_lengths_method == DO_NOT_SET_LENGTHS )
+            expected_status = PSA_ERROR_BAD_STATE;
 
-        PSA_ASSERT( psa_aead_update_ad( &operation, additional_data->x,
-                                        additional_data->len ) );
+        /* Ensure we can still complete operation, unless it's CCM and we didn't set lengths. */
+        TEST_EQUAL( psa_aead_update_ad( &operation, additional_data->x,
+                                        additional_data->len ),
+                    expected_status );
 
-        PSA_ASSERT( psa_aead_update( &operation, input_data->x, input_data->len,
+        TEST_EQUAL( psa_aead_update( &operation, input_data->x, input_data->len,
                                      output, output_size,
-                                     &ciphertext_length ) );
+                                     &ciphertext_length ),
+                    expected_status );
 
-        PSA_ASSERT( psa_aead_finish( &operation, ciphertext, ciphertext_size,
+        TEST_EQUAL( psa_aead_finish( &operation, ciphertext, ciphertext_size,
                                      &ciphertext_length, tag_buffer,
-                                     PSA_AEAD_TAG_MAX_SIZE, &tag_length ) );
+                                     PSA_AEAD_TAG_MAX_SIZE, &tag_length ),
+                    expected_status );
     }
 
 exit:
@@ -4409,6 +4904,7 @@ void aead_multipart_verify( int key_type_arg, data_t *key_data,
                             data_t *input_data,
                             data_t *tag,
                             int tag_usage_arg,
+                            int expected_setup_status_arg,
                             int expected_status_arg )
 {
     mbedtls_svc_key_id_t key = MBEDTLS_SVC_KEY_ID_INIT;
@@ -4418,6 +4914,7 @@ void aead_multipart_verify( int key_type_arg, data_t *key_data,
     psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
     psa_status_t status = PSA_ERROR_GENERIC_ERROR;
     psa_status_t expected_status = expected_status_arg;
+    psa_status_t expected_setup_status = expected_setup_status_arg;
     unsigned char *plaintext = NULL;
     unsigned char *finish_plaintext = NULL;
     size_t plaintext_size = 0;
@@ -4457,6 +4954,10 @@ void aead_multipart_verify( int key_type_arg, data_t *key_data,
         MBEDTLS_TEST_PSA_SKIP_IF_ALT_AES_192( key_type, key_data->len * 8 );
         MBEDTLS_TEST_PSA_SKIP_IF_ALT_GCM_NOT_12BYTES_NONCE( alg, nonce->len );
     }
+    TEST_EQUAL( status, expected_setup_status );
+
+    if( status != PSA_SUCCESS )
+        goto exit;
 
     PSA_ASSERT( status );
 
@@ -4464,17 +4965,7 @@ void aead_multipart_verify( int key_type_arg, data_t *key_data,
 
     status = psa_aead_set_lengths( &operation, additional_data->len,
                                       input_data->len );
-
-    if( status != PSA_SUCCESS )
-    {
-        /* Invalid tag lengths are detected in CCM at this point, as they
-         * would be written into the first block. They should really be
-         * detected in psa_aead_encrypt/decrypt_setup, and will be fixed
-         * to do so in the future, until that point, this is a
-         * workaround.*/
-        TEST_EQUAL( status, expected_status );
-        goto exit;
-    }
+    PSA_ASSERT( status );
 
     PSA_ASSERT( psa_aead_update_ad( &operation, additional_data->x,
                                     additional_data->len ) );
@@ -4781,6 +5272,208 @@ void aead_multipart_state_test( int key_type_arg, data_t *key_data,
 
     psa_aead_abort( &operation );
 
+    /* Test for generating nonce after calling set lengths */
+
+    PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
+
+    PSA_ASSERT( psa_aead_set_lengths( &operation, additional_data->len,
+                                      input_data->len ) );
+
+    PSA_ASSERT( psa_aead_generate_nonce( &operation, nonce_buffer,
+                                         PSA_AEAD_NONCE_MAX_SIZE,
+                                         &nonce_length ) );
+
+    psa_aead_abort( &operation );
+
+    /* Test for generating nonce after calling set lengths with UINT32_MAX ad_data length */
+
+    PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
+
+    if( operation.alg == PSA_ALG_CCM )
+    {
+        TEST_EQUAL( psa_aead_set_lengths( &operation, UINT32_MAX,
+                                          input_data->len ),
+                    PSA_ERROR_INVALID_ARGUMENT );
+        TEST_EQUAL( psa_aead_generate_nonce( &operation, nonce_buffer,
+                                             PSA_AEAD_NONCE_MAX_SIZE,
+                                             &nonce_length ),
+                    PSA_ERROR_BAD_STATE );
+    }
+    else
+    {
+        PSA_ASSERT( psa_aead_set_lengths( &operation, UINT32_MAX,
+                                          input_data->len ) );
+        PSA_ASSERT( psa_aead_generate_nonce( &operation, nonce_buffer,
+                                             PSA_AEAD_NONCE_MAX_SIZE,
+                                             &nonce_length ) );
+    }
+
+    psa_aead_abort( &operation );
+
+    /* Test for generating nonce after calling set lengths with SIZE_MAX ad_data length */
+#if SIZE_MAX > UINT32_MAX
+    PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
+
+    if( operation.alg == PSA_ALG_CCM || operation.alg == PSA_ALG_GCM )
+    {
+        TEST_EQUAL( psa_aead_set_lengths( &operation, SIZE_MAX,
+                                          input_data->len ),
+                    PSA_ERROR_INVALID_ARGUMENT );
+        TEST_EQUAL( psa_aead_generate_nonce( &operation, nonce_buffer,
+                                             PSA_AEAD_NONCE_MAX_SIZE,
+                                             &nonce_length ),
+                    PSA_ERROR_BAD_STATE );
+    }
+    else
+    {
+        PSA_ASSERT( psa_aead_set_lengths( &operation, SIZE_MAX,
+                                          input_data->len ) );
+        PSA_ASSERT( psa_aead_generate_nonce( &operation, nonce_buffer,
+                                             PSA_AEAD_NONCE_MAX_SIZE,
+                                             &nonce_length ) );
+    }
+
+    psa_aead_abort( &operation );
+#endif
+
+    /* Test for calling set lengths with a UINT32_MAX ad_data length, after generating nonce */
+
+    PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
+
+    PSA_ASSERT( psa_aead_generate_nonce( &operation, nonce_buffer,
+                                         PSA_AEAD_NONCE_MAX_SIZE,
+                                         &nonce_length ) );
+
+    if( operation.alg == PSA_ALG_CCM )
+    {
+        TEST_EQUAL( psa_aead_set_lengths( &operation, UINT32_MAX,
+                                          input_data->len ),
+                    PSA_ERROR_INVALID_ARGUMENT );
+    }
+    else
+    {
+        PSA_ASSERT( psa_aead_set_lengths( &operation, UINT32_MAX,
+                                          input_data->len ) );
+    }
+
+    psa_aead_abort( &operation );
+
+    /* ------------------------------------------------------- */
+    /* Test for setting nonce after calling set lengths */
+
+    PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
+
+    PSA_ASSERT( psa_aead_set_lengths( &operation, additional_data->len,
+                                      input_data->len ) );
+
+    PSA_ASSERT( psa_aead_set_nonce( &operation, nonce->x, nonce->len ) );
+
+    psa_aead_abort( &operation );
+
+    /* Test for setting nonce after calling set lengths with UINT32_MAX ad_data length */
+
+    PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
+
+    if( operation.alg == PSA_ALG_CCM )
+    {
+        TEST_EQUAL( psa_aead_set_lengths( &operation, UINT32_MAX,
+                                          input_data->len ),
+                    PSA_ERROR_INVALID_ARGUMENT );
+        TEST_EQUAL( psa_aead_set_nonce( &operation, nonce->x, nonce->len ),
+                    PSA_ERROR_BAD_STATE );
+    }
+    else
+    {
+        PSA_ASSERT( psa_aead_set_lengths( &operation, UINT32_MAX,
+                                          input_data->len ) );
+        PSA_ASSERT( psa_aead_set_nonce( &operation, nonce->x, nonce->len ) );
+    }
+
+    psa_aead_abort( &operation );
+
+    /* Test for setting nonce after calling set lengths with SIZE_MAX ad_data length */
+#if SIZE_MAX > UINT32_MAX
+    PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
+
+    if( operation.alg == PSA_ALG_CCM || operation.alg == PSA_ALG_GCM )
+    {
+        TEST_EQUAL( psa_aead_set_lengths( &operation, SIZE_MAX,
+                                          input_data->len ),
+                    PSA_ERROR_INVALID_ARGUMENT );
+        TEST_EQUAL( psa_aead_set_nonce( &operation, nonce->x, nonce->len ),
+                    PSA_ERROR_BAD_STATE );
+    }
+    else
+    {
+        PSA_ASSERT( psa_aead_set_lengths( &operation, SIZE_MAX,
+                                          input_data->len ) );
+        PSA_ASSERT( psa_aead_set_nonce( &operation, nonce->x, nonce->len ) );
+    }
+
+    psa_aead_abort( &operation );
+#endif
+
+    /* Test for calling set lengths with an ad_data length of UINT32_MAX, after setting nonce */
+
+    PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
+
+    PSA_ASSERT( psa_aead_set_nonce( &operation, nonce->x, nonce->len ) );
+
+    if( operation.alg == PSA_ALG_CCM )
+    {
+        TEST_EQUAL( psa_aead_set_lengths( &operation, UINT32_MAX,
+                                          input_data->len ),
+                    PSA_ERROR_INVALID_ARGUMENT );
+    }
+    else
+    {
+        PSA_ASSERT( psa_aead_set_lengths( &operation, UINT32_MAX,
+                                          input_data->len ) );
+    }
+
+    psa_aead_abort( &operation );
+
+    /* Test for setting nonce after calling set lengths with plaintext length of SIZE_MAX */
+#if SIZE_MAX > UINT32_MAX
+    PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
+
+    if( operation.alg == PSA_ALG_GCM )
+    {
+        TEST_EQUAL( psa_aead_set_lengths( &operation, additional_data->len,
+                                          SIZE_MAX ),
+                    PSA_ERROR_INVALID_ARGUMENT );
+        TEST_EQUAL( psa_aead_set_nonce( &operation, nonce->x, nonce->len ),
+                    PSA_ERROR_BAD_STATE );
+    }
+    else if ( operation.alg != PSA_ALG_CCM )
+    {
+        PSA_ASSERT( psa_aead_set_lengths( &operation, additional_data->len,
+                                          SIZE_MAX ) );
+        PSA_ASSERT( psa_aead_set_nonce( &operation, nonce->x, nonce->len ) );
+    }
+
+    psa_aead_abort( &operation );
+
+    /* Test for calling set lengths with an plaintext length of SIZE_MAX, after setting nonce */
+    PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
+
+    PSA_ASSERT( psa_aead_set_nonce( &operation, nonce->x, nonce->len ) );
+
+    if( operation.alg == PSA_ALG_GCM )
+    {
+        TEST_EQUAL( psa_aead_set_lengths( &operation, additional_data->len,
+                                          SIZE_MAX ),
+                    PSA_ERROR_INVALID_ARGUMENT );
+    }
+    else if ( operation.alg != PSA_ALG_CCM )
+    {
+        PSA_ASSERT( psa_aead_set_lengths( &operation, additional_data->len,
+                                          SIZE_MAX ) );
+    }
+
+    psa_aead_abort( &operation );
+#endif
+
     /* ------------------------------------------------------- */
 
     PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
@@ -4820,19 +5513,28 @@ void aead_multipart_state_test( int key_type_arg, data_t *key_data,
 
     psa_aead_abort( &operation );
 
-    /* Test for setting lengths after already starting data. */
+    /* Test for setting lengths after setting nonce + already starting data. */
 
     PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
 
     PSA_ASSERT( psa_aead_set_nonce( &operation, nonce->x, nonce->len ) );
 
-    PSA_ASSERT( psa_aead_update_ad( &operation, additional_data->x,
-                                    additional_data->len ) );
+    if( operation.alg == PSA_ALG_CCM )
+    {
 
-    TEST_EQUAL( psa_aead_set_lengths( &operation, additional_data->len,
-                                      input_data->len ),
-                PSA_ERROR_BAD_STATE );
+        TEST_EQUAL( psa_aead_update_ad( &operation, additional_data->x,
+                                        additional_data->len ),
+                    PSA_ERROR_BAD_STATE );
+    }
+    else
+    {
+        PSA_ASSERT( psa_aead_update_ad( &operation, additional_data->x,
+                                        additional_data->len ) );
 
+        TEST_EQUAL( psa_aead_set_lengths( &operation, additional_data->len,
+                                          input_data->len ),
+                    PSA_ERROR_BAD_STATE );
+    }
     psa_aead_abort( &operation );
 
     /* ------------------------------------------------------- */
@@ -4841,14 +5543,133 @@ void aead_multipart_state_test( int key_type_arg, data_t *key_data,
 
     PSA_ASSERT( psa_aead_set_nonce( &operation, nonce->x, nonce->len ) );
 
-    PSA_ASSERT( psa_aead_update( &operation, input_data->x,
-                                 input_data->len, output_data,
-                                 output_size, &output_length ) );
+    if( operation.alg == PSA_ALG_CCM )
+    {
+        TEST_EQUAL( psa_aead_update( &operation, input_data->x,
+                                     input_data->len, output_data,
+                                     output_size, &output_length ),
+                    PSA_ERROR_BAD_STATE );
 
-    TEST_EQUAL( psa_aead_set_lengths( &operation, additional_data->len,
-                                      input_data->len ),
-                PSA_ERROR_BAD_STATE );
+    }
+    else
+    {
+        PSA_ASSERT( psa_aead_update( &operation, input_data->x,
+                                     input_data->len, output_data,
+                                     output_size, &output_length ) );
 
+        TEST_EQUAL( psa_aead_set_lengths( &operation, additional_data->len,
+                                          input_data->len ),
+                    PSA_ERROR_BAD_STATE );
+    }
+    psa_aead_abort( &operation );
+
+    /* ------------------------------------------------------- */
+
+    PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
+
+    PSA_ASSERT( psa_aead_set_nonce( &operation, nonce->x, nonce->len ) );
+
+    if( operation.alg == PSA_ALG_CCM )
+    {
+        PSA_ASSERT( psa_aead_finish( &operation, final_data,
+                                     finish_output_size,
+                                     &output_part_length,
+                                     tag_buffer, tag_length,
+                                     &tag_size ) );
+    }
+    else
+    {
+        PSA_ASSERT( psa_aead_finish( &operation, final_data,
+                                     finish_output_size,
+                                     &output_part_length,
+                                     tag_buffer, tag_length,
+                                     &tag_size ) );
+
+        TEST_EQUAL( psa_aead_set_lengths( &operation, additional_data->len,
+                                          input_data->len ),
+                    PSA_ERROR_BAD_STATE );
+    }
+    psa_aead_abort( &operation );
+
+    /* Test for setting lengths after generating nonce + already starting data. */
+
+    PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
+
+    PSA_ASSERT( psa_aead_generate_nonce( &operation, nonce_buffer,
+                                         PSA_AEAD_NONCE_MAX_SIZE,
+                                         &nonce_length ) );
+    if( operation.alg == PSA_ALG_CCM )
+    {
+
+        TEST_EQUAL( psa_aead_update_ad( &operation, additional_data->x,
+                                        additional_data->len ),
+                    PSA_ERROR_BAD_STATE );
+    }
+    else
+    {
+        PSA_ASSERT( psa_aead_update_ad( &operation, additional_data->x,
+                                        additional_data->len ) );
+
+        TEST_EQUAL( psa_aead_set_lengths( &operation, additional_data->len,
+                                          input_data->len ),
+                    PSA_ERROR_BAD_STATE );
+    }
+    psa_aead_abort( &operation );
+
+    /* ------------------------------------------------------- */
+
+    PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
+
+    PSA_ASSERT( psa_aead_generate_nonce( &operation, nonce_buffer,
+                                         PSA_AEAD_NONCE_MAX_SIZE,
+                                         &nonce_length ) );
+    if( operation.alg == PSA_ALG_CCM )
+    {
+        TEST_EQUAL( psa_aead_update( &operation, input_data->x,
+                                     input_data->len, output_data,
+                                     output_size, &output_length ),
+                    PSA_ERROR_BAD_STATE );
+
+    }
+    else
+    {
+        PSA_ASSERT( psa_aead_update( &operation, input_data->x,
+                                     input_data->len, output_data,
+                                     output_size, &output_length ) );
+
+        TEST_EQUAL( psa_aead_set_lengths( &operation, additional_data->len,
+                                          input_data->len ),
+                    PSA_ERROR_BAD_STATE );
+    }
+    psa_aead_abort( &operation );
+
+    /* ------------------------------------------------------- */
+
+    PSA_ASSERT( psa_aead_encrypt_setup( &operation, key, alg ) );
+
+    PSA_ASSERT( psa_aead_generate_nonce( &operation, nonce_buffer,
+                                         PSA_AEAD_NONCE_MAX_SIZE,
+                                         &nonce_length ) );
+    if( operation.alg == PSA_ALG_CCM )
+    {
+        PSA_ASSERT( psa_aead_finish( &operation, final_data,
+                                     finish_output_size,
+                                     &output_part_length,
+                                     tag_buffer, tag_length,
+                                     &tag_size ) );
+    }
+    else
+    {
+        PSA_ASSERT( psa_aead_finish( &operation, final_data,
+                                     finish_output_size,
+                                     &output_part_length,
+                                     tag_buffer, tag_length,
+                                     &tag_size ) );
+
+        TEST_EQUAL( psa_aead_set_lengths( &operation, additional_data->len,
+                                          input_data->len ),
+                    PSA_ERROR_BAD_STATE );
+    }
     psa_aead_abort( &operation );
 
     /* Test for not sending any additional data or data after setting non zero
@@ -5004,14 +5825,16 @@ void aead_multipart_state_test( int key_type_arg, data_t *key_data,
 
     PSA_ASSERT( psa_aead_set_nonce( &operation, nonce->x, nonce->len ) );
 
-    PSA_ASSERT( psa_aead_update( &operation, input_data->x,
-                                 input_data->len, output_data,
-                                 output_size, &output_length ) );
+    if( operation.alg != PSA_ALG_CCM )
+    {
+        PSA_ASSERT( psa_aead_update( &operation, input_data->x,
+                                     input_data->len, output_data,
+                                     output_size, &output_length ) );
 
-    TEST_EQUAL( psa_aead_update_ad( &operation, additional_data->x,
-                                    additional_data->len ),
-                PSA_ERROR_BAD_STATE );
-
+        TEST_EQUAL( psa_aead_update_ad( &operation, additional_data->x,
+                                        additional_data->len ),
+                    PSA_ERROR_BAD_STATE );
+    }
     psa_aead_abort( &operation );
 
     /* Test calling finish on decryption. */
@@ -6074,19 +6897,27 @@ exit:
 
 /* BEGIN_CASE */
 void derive_output( int alg_arg,
-                    int step1_arg, data_t *input1,
-                    int step2_arg, data_t *input2,
-                    int step3_arg, data_t *input3,
+                    int step1_arg, data_t *input1, int expected_status_arg1,
+                    int step2_arg, data_t *input2, int expected_status_arg2,
+                    int step3_arg, data_t *input3, int expected_status_arg3,
+                    int step4_arg, data_t *input4, int expected_status_arg4,
+                    data_t *key_agreement_peer_key,
                     int requested_capacity_arg,
                     data_t *expected_output1,
-                    data_t *expected_output2 )
+                    data_t *expected_output2,
+                    int other_key_input_type,
+                    int key_input_type,
+                    int derive_type )
 {
     psa_algorithm_t alg = alg_arg;
-    psa_key_derivation_step_t steps[] = {step1_arg, step2_arg, step3_arg};
-    data_t *inputs[] = {input1, input2, input3};
-    mbedtls_svc_key_id_t keys[] = { MBEDTLS_SVC_KEY_ID_INIT,
-                                    MBEDTLS_SVC_KEY_ID_INIT,
-                                    MBEDTLS_SVC_KEY_ID_INIT };
+    psa_key_derivation_step_t steps[] = {step1_arg, step2_arg, step3_arg, step4_arg};
+    data_t *inputs[] = {input1, input2, input3, input4};
+    mbedtls_svc_key_id_t keys[] = {MBEDTLS_SVC_KEY_ID_INIT,
+                                   MBEDTLS_SVC_KEY_ID_INIT,
+                                   MBEDTLS_SVC_KEY_ID_INIT,
+                                   MBEDTLS_SVC_KEY_ID_INIT};
+    psa_status_t statuses[] = {expected_status_arg1, expected_status_arg2,
+                               expected_status_arg3, expected_status_arg4};
     size_t requested_capacity = requested_capacity_arg;
     psa_key_derivation_operation_t operation = PSA_KEY_DERIVATION_OPERATION_INIT;
     uint8_t *expected_outputs[2] =
@@ -6097,7 +6928,11 @@ void derive_output( int alg_arg,
     uint8_t *output_buffer = NULL;
     size_t expected_capacity;
     size_t current_capacity;
-    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_attributes_t attributes1 = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_attributes_t attributes2 = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_attributes_t attributes3 = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_attributes_t attributes4 = PSA_KEY_ATTRIBUTES_INIT;
+    mbedtls_svc_key_id_t derived_key = MBEDTLS_SVC_KEY_ID_INIT;
     psa_status_t status;
     size_t i;
 
@@ -6111,10 +6946,6 @@ void derive_output( int alg_arg,
     ASSERT_ALLOC( output_buffer, output_buffer_size );
     PSA_ASSERT( psa_crypto_init( ) );
 
-    psa_set_key_usage_flags( &attributes, PSA_KEY_USAGE_DERIVE );
-    psa_set_key_algorithm( &attributes, alg );
-    psa_set_key_type( &attributes, PSA_KEY_TYPE_DERIVE );
-
     /* Extraction phase. */
     PSA_ASSERT( psa_key_derivation_setup( &operation, alg ) );
     PSA_ASSERT( psa_key_derivation_set_capacity( &operation,
@@ -6126,19 +6957,89 @@ void derive_output( int alg_arg,
             case 0:
                 break;
             case PSA_KEY_DERIVATION_INPUT_SECRET:
-                PSA_ASSERT( psa_import_key( &attributes,
-                                            inputs[i]->x, inputs[i]->len,
-                                            &keys[i] ) );
-
-                if ( PSA_ALG_IS_TLS12_PSK_TO_MS( alg ) )
+                switch( key_input_type )
                 {
-                    PSA_ASSERT( psa_get_key_attributes( keys[i], &attributes ) );
-                    TEST_ASSERT( PSA_BITS_TO_BYTES( psa_get_key_bits( &attributes ) ) <=
-                                 PSA_TLS12_PSK_TO_MS_PSK_MAX_SIZE );
+                    case 0: // input bytes
+                        PSA_ASSERT( psa_key_derivation_input_bytes(
+                                        &operation, steps[i],
+                                        inputs[i]->x, inputs[i]->len ) );
+                        break;
+                    case 1: // input key
+                        psa_set_key_usage_flags( &attributes1, PSA_KEY_USAGE_DERIVE );
+                        psa_set_key_algorithm( &attributes1, alg );
+                        psa_set_key_type( &attributes1, PSA_KEY_TYPE_DERIVE );
+
+                        PSA_ASSERT( psa_import_key( &attributes1,
+                                                    inputs[i]->x, inputs[i]->len,
+                                                    &keys[i] ) );
+
+                        if( PSA_ALG_IS_TLS12_PSK_TO_MS( alg ) )
+                        {
+                            PSA_ASSERT( psa_get_key_attributes( keys[i], &attributes1 ) );
+                            TEST_ASSERT( PSA_BITS_TO_BYTES( psa_get_key_bits( &attributes1 ) ) <=
+                                        PSA_TLS12_PSK_TO_MS_PSK_MAX_SIZE );
+                        }
+
+                        PSA_ASSERT( psa_key_derivation_input_key( &operation,
+                                                                  steps[i],
+                                                                  keys[i] ) );
+                        break;
+                    default:
+                        TEST_ASSERT( ! "default case not supported" );
+                        break;
+                }
+                break;
+            case PSA_KEY_DERIVATION_INPUT_OTHER_SECRET:
+                switch( other_key_input_type )
+                {
+                    case 0: // input bytes
+                        TEST_EQUAL( psa_key_derivation_input_bytes( &operation,
+                                                                    steps[i],
+                                                                    inputs[i]->x,
+                                                                    inputs[i]->len ),
+                                    statuses[i] );
+                        break;
+                    case 1: // input key, type DERIVE
+                    case 11: // input key, type RAW
+                        psa_set_key_usage_flags( &attributes2, PSA_KEY_USAGE_DERIVE );
+                        psa_set_key_algorithm( &attributes2, alg );
+                        psa_set_key_type( &attributes2, PSA_KEY_TYPE_DERIVE );
+
+                        // other secret of type RAW_DATA passed with input_key
+                        if( other_key_input_type == 11 )
+                            psa_set_key_type( &attributes2, PSA_KEY_TYPE_RAW_DATA );
+
+                        PSA_ASSERT( psa_import_key( &attributes2,
+                                                    inputs[i]->x, inputs[i]->len,
+                                                    &keys[i] ) );
+
+                        TEST_EQUAL( psa_key_derivation_input_key( &operation,
+                                                                  steps[i],
+                                                                  keys[i] ),
+                                    statuses[i] );
+                        break;
+                    case 2: // key agreement
+                        psa_set_key_usage_flags( &attributes3, PSA_KEY_USAGE_DERIVE );
+                        psa_set_key_algorithm( &attributes3, alg );
+                        psa_set_key_type( &attributes3, PSA_KEY_TYPE_ECC_KEY_PAIR(PSA_ECC_FAMILY_SECP_R1) );
+
+                        PSA_ASSERT( psa_import_key( &attributes3,
+                                                    inputs[i]->x, inputs[i]->len,
+                                                    &keys[i] ) );
+
+                        TEST_EQUAL( psa_key_derivation_key_agreement(
+                                        &operation,
+                                        PSA_KEY_DERIVATION_INPUT_OTHER_SECRET,
+                                        keys[i], key_agreement_peer_key->x,
+                                        key_agreement_peer_key->len ), statuses[i] );
+                        break;
+                    default:
+                        TEST_ASSERT( ! "default case not supported" );
+                        break;
                 }
 
-                PSA_ASSERT( psa_key_derivation_input_key(
-                                &operation, steps[i], keys[i] ) );
+                if( statuses[i] != PSA_SUCCESS )
+                    goto exit;
                 break;
             default:
                 PSA_ASSERT( psa_key_derivation_input_bytes(
@@ -6153,37 +7054,57 @@ void derive_output( int alg_arg,
     TEST_EQUAL( current_capacity, requested_capacity );
     expected_capacity = requested_capacity;
 
-    /* Expansion phase. */
-    for( i = 0; i < ARRAY_LENGTH( expected_outputs ); i++ )
+    if( derive_type == 1 ) // output key
     {
-        /* Read some bytes. */
-        status = psa_key_derivation_output_bytes( &operation,
-                                                  output_buffer, output_sizes[i] );
-        if( expected_capacity == 0 && output_sizes[i] == 0 )
+        psa_status_t expected_status = PSA_ERROR_NOT_PERMITTED;
+
+        /* For output key derivation secret must be provided using
+           input key, otherwise operation is not permitted. */
+        if( key_input_type == 1 )
+            expected_status = PSA_SUCCESS;
+
+        psa_set_key_usage_flags( &attributes4, PSA_KEY_USAGE_EXPORT );
+        psa_set_key_algorithm( &attributes4, alg );
+        psa_set_key_type( &attributes4, PSA_KEY_TYPE_DERIVE );
+        psa_set_key_bits( &attributes4, 48 );
+
+        TEST_EQUAL( psa_key_derivation_output_key( &attributes4, &operation,
+                                        &derived_key ), expected_status );
+    }
+    else // output bytes
+    {
+        /* Expansion phase. */
+        for( i = 0; i < ARRAY_LENGTH( expected_outputs ); i++ )
         {
-            /* Reading 0 bytes when 0 bytes are available can go either way. */
-            TEST_ASSERT( status == PSA_SUCCESS ||
-                         status == PSA_ERROR_INSUFFICIENT_DATA );
-            continue;
+            /* Read some bytes. */
+            status = psa_key_derivation_output_bytes( &operation,
+                                                    output_buffer, output_sizes[i] );
+            if( expected_capacity == 0 && output_sizes[i] == 0 )
+            {
+                /* Reading 0 bytes when 0 bytes are available can go either way. */
+                TEST_ASSERT( status == PSA_SUCCESS ||
+                            status == PSA_ERROR_INSUFFICIENT_DATA );
+                continue;
+            }
+            else if( expected_capacity == 0 ||
+                    output_sizes[i] > expected_capacity )
+            {
+                /* Capacity exceeded. */
+                TEST_EQUAL( status, PSA_ERROR_INSUFFICIENT_DATA );
+                expected_capacity = 0;
+                continue;
+            }
+            /* Success. Check the read data. */
+            PSA_ASSERT( status );
+            if( output_sizes[i] != 0 )
+                ASSERT_COMPARE( output_buffer, output_sizes[i],
+                                expected_outputs[i], output_sizes[i] );
+            /* Check the operation status. */
+            expected_capacity -= output_sizes[i];
+            PSA_ASSERT( psa_key_derivation_get_capacity( &operation,
+                                                        &current_capacity ) );
+            TEST_EQUAL( expected_capacity, current_capacity );
         }
-        else if( expected_capacity == 0 ||
-                 output_sizes[i] > expected_capacity )
-        {
-            /* Capacity exceeded. */
-            TEST_EQUAL( status, PSA_ERROR_INSUFFICIENT_DATA );
-            expected_capacity = 0;
-            continue;
-        }
-        /* Success. Check the read data. */
-        PSA_ASSERT( status );
-        if( output_sizes[i] != 0 )
-            ASSERT_COMPARE( output_buffer, output_sizes[i],
-                            expected_outputs[i], output_sizes[i] );
-        /* Check the operation status. */
-        expected_capacity -= output_sizes[i];
-        PSA_ASSERT( psa_key_derivation_get_capacity( &operation,
-                                                     &current_capacity ) );
-        TEST_EQUAL( expected_capacity, current_capacity );
     }
     PSA_ASSERT( psa_key_derivation_abort( &operation ) );
 
@@ -6192,6 +7113,7 @@ exit:
     psa_key_derivation_abort( &operation );
     for( i = 0; i < ARRAY_LENGTH( keys ); i++ )
         psa_destroy_key( keys[i] );
+    psa_destroy_key( derived_key );
     PSA_DONE( );
 }
 /* END_CASE */
@@ -6401,6 +7323,65 @@ void derive_key_export( int alg_arg,
 
 exit:
     mbedtls_free( output_buffer );
+    mbedtls_free( export_buffer );
+    psa_key_derivation_abort( &operation );
+    psa_destroy_key( base_key );
+    psa_destroy_key( derived_key );
+    PSA_DONE( );
+}
+/* END_CASE */
+
+/* BEGIN_CASE */
+void derive_key_type( int alg_arg,
+                      data_t *key_data,
+                      data_t *input1,
+                      data_t *input2,
+                      int key_type_arg, int bits_arg,
+                      data_t *expected_export )
+{
+    mbedtls_svc_key_id_t base_key = MBEDTLS_SVC_KEY_ID_INIT;
+    mbedtls_svc_key_id_t derived_key = MBEDTLS_SVC_KEY_ID_INIT;
+    const psa_algorithm_t alg = alg_arg;
+    const psa_key_type_t key_type = key_type_arg;
+    const size_t bits = bits_arg;
+    psa_key_derivation_operation_t operation = PSA_KEY_DERIVATION_OPERATION_INIT;
+    const size_t export_buffer_size =
+        PSA_EXPORT_KEY_OUTPUT_SIZE( key_type, bits );
+    uint8_t *export_buffer = NULL;
+    psa_key_attributes_t base_attributes = PSA_KEY_ATTRIBUTES_INIT;
+    psa_key_attributes_t derived_attributes = PSA_KEY_ATTRIBUTES_INIT;
+    size_t export_length;
+
+    ASSERT_ALLOC( export_buffer, export_buffer_size );
+    PSA_ASSERT( psa_crypto_init( ) );
+
+    psa_set_key_usage_flags( &base_attributes, PSA_KEY_USAGE_DERIVE );
+    psa_set_key_algorithm( &base_attributes, alg );
+    psa_set_key_type( &base_attributes, PSA_KEY_TYPE_DERIVE );
+    PSA_ASSERT( psa_import_key( &base_attributes, key_data->x, key_data->len,
+                                &base_key ) );
+
+    if( mbedtls_test_psa_setup_key_derivation_wrap(
+            &operation, base_key, alg,
+            input1->x, input1->len,
+            input2->x, input2->len,
+            PSA_KEY_DERIVATION_UNLIMITED_CAPACITY ) == 0 )
+        goto exit;
+
+    psa_set_key_usage_flags( &derived_attributes, PSA_KEY_USAGE_EXPORT );
+    psa_set_key_algorithm( &derived_attributes, 0 );
+    psa_set_key_type( &derived_attributes, key_type );
+    psa_set_key_bits( &derived_attributes, bits );
+    PSA_ASSERT( psa_key_derivation_output_key( &derived_attributes, &operation,
+                                               &derived_key ) );
+
+    PSA_ASSERT( psa_export_key( derived_key,
+                                export_buffer, export_buffer_size,
+                                &export_length ) );
+    ASSERT_COMPARE( export_buffer, export_length,
+                    expected_export->x, expected_export->len );
+
+exit:
     mbedtls_free( export_buffer );
     psa_key_derivation_abort( &operation );
     psa_destroy_key( base_key );
