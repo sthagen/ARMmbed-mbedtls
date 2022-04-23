@@ -626,7 +626,7 @@ static void ssl_handshake_params_init( mbedtls_ssl_handshake_params *handshake )
 #if defined(MBEDTLS_DHM_C)
     mbedtls_dhm_init( &handshake->dhm_ctx );
 #endif
-#if defined(MBEDTLS_ECDH_C)
+#if !defined(MBEDTLS_USE_PSA_CRYPTO) && defined(MBEDTLS_ECDH_C)
     mbedtls_ecdh_init( &handshake->ecdh_ctx );
 #endif
 #if defined(MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED)
@@ -918,12 +918,6 @@ static int ssl_conf_version_check( const mbedtls_ssl_context *ssl )
              return( MBEDTLS_ERR_SSL_FEATURE_UNAVAILABLE );
         }
 
-        if( conf->endpoint == MBEDTLS_SSL_IS_SERVER )
-        {
-            MBEDTLS_SSL_DEBUG_MSG( 1, ( "TLS 1.3 server is not supported yet." ) );
-            return( MBEDTLS_ERR_SSL_FEATURE_UNAVAILABLE );
-        }
-
         MBEDTLS_SSL_DEBUG_MSG( 4, ( "The SSL configuration is tls13 only." ) );
         return( 0 );
     }
@@ -951,6 +945,7 @@ static int ssl_conf_version_check( const mbedtls_ssl_context *ssl )
             MBEDTLS_SSL_DEBUG_MSG( 1, ( "TLS 1.3 server is not supported yet." ) );
             return( MBEDTLS_ERR_SSL_FEATURE_UNAVAILABLE );
         }
+
 
         MBEDTLS_SSL_DEBUG_MSG( 4, ( "The SSL configuration is TLS 1.3 or TLS 1.2." ) );
         return( 0 );
@@ -3116,7 +3111,7 @@ void mbedtls_ssl_handshake_free( mbedtls_ssl_context *ssl )
 #if defined(MBEDTLS_DHM_C)
     mbedtls_dhm_free( &handshake->dhm_ctx );
 #endif
-#if defined(MBEDTLS_ECDH_C)
+#if !defined(MBEDTLS_USE_PSA_CRYPTO) && defined(MBEDTLS_ECDH_C)
     mbedtls_ecdh_free( &handshake->ecdh_ctx );
 #endif
 #if defined(MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED)
@@ -4215,8 +4210,7 @@ int mbedtls_ssl_config_defaults( mbedtls_ssl_config *conf,
     conf->tls13_kex_modes = MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_ALL;
 #endif /* MBEDTLS_SSL_PROTO_TLS1_3 */
 
-    if( ( endpoint == MBEDTLS_SSL_IS_SERVER ) ||
-        ( transport == MBEDTLS_SSL_TRANSPORT_DATAGRAM ) )
+    if( transport == MBEDTLS_SSL_TRANSPORT_DATAGRAM  )
     {
 #if defined(MBEDTLS_SSL_PROTO_TLS1_2)
         conf->min_tls_version = MBEDTLS_SSL_VERSION_TLS1_2;
@@ -4228,8 +4222,17 @@ int mbedtls_ssl_config_defaults( mbedtls_ssl_config *conf,
     else
     {
 #if defined(MBEDTLS_SSL_PROTO_TLS1_2) && defined(MBEDTLS_SSL_PROTO_TLS1_3)
-        conf->min_tls_version = MBEDTLS_SSL_VERSION_TLS1_2;
-        conf->max_tls_version = MBEDTLS_SSL_VERSION_TLS1_3;
+        if( endpoint == MBEDTLS_SSL_IS_CLIENT )
+        {
+            conf->min_tls_version = MBEDTLS_SSL_VERSION_TLS1_2;
+            conf->max_tls_version = MBEDTLS_SSL_VERSION_TLS1_3;
+        }
+        else
+        /* Hybrid TLS 1.2 / 1.3 is not supported on server side yet */
+        {
+            conf->min_tls_version = MBEDTLS_SSL_VERSION_TLS1_2;
+            conf->max_tls_version = MBEDTLS_SSL_VERSION_TLS1_2;
+        }
 #elif defined(MBEDTLS_SSL_PROTO_TLS1_3)
         conf->min_tls_version = MBEDTLS_SSL_VERSION_TLS1_3;
         conf->max_tls_version = MBEDTLS_SSL_VERSION_TLS1_3;
@@ -5342,6 +5345,11 @@ int mbedtls_ssl_psk_derive_premaster( mbedtls_ssl_context *ssl, mbedtls_key_exch
     const unsigned char *psk = NULL;
     size_t psk_len = 0;
 
+#if defined(MBEDTLS_USE_PSA_CRYPTO) &&                 \
+    defined(MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED)
+    (void) key_ex;
+#endif /* MBEDTLS_USE_PSA_CRYPTO && MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED */
+
     if( mbedtls_ssl_get_psk( ssl, &psk, &psk_len )
             == MBEDTLS_ERR_SSL_PRIVATE_KEY_REQUIRED )
     {
@@ -5414,7 +5422,8 @@ int mbedtls_ssl_psk_derive_premaster( mbedtls_ssl_context *ssl, mbedtls_key_exch
     }
     else
 #endif /* MBEDTLS_KEY_EXCHANGE_DHE_PSK_ENABLED */
-#if defined(MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED)
+#if !defined(MBEDTLS_USE_PSA_CRYPTO) &&                 \
+    defined(MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED)
     if( key_ex == MBEDTLS_KEY_EXCHANGE_ECDHE_PSK )
     {
         int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
@@ -5435,7 +5444,7 @@ int mbedtls_ssl_psk_derive_premaster( mbedtls_ssl_context *ssl, mbedtls_key_exch
                                 MBEDTLS_DEBUG_ECDH_Z );
     }
     else
-#endif /* MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED */
+#endif /* !MBEDTLS_USE_PSA_CRYPTO && MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED */
     {
         MBEDTLS_SSL_DEBUG_MSG( 1, ( "should never happen" ) );
         return( MBEDTLS_ERR_SSL_INTERNAL_ERROR );
@@ -7775,5 +7784,44 @@ static int ssl_session_load_tls12( mbedtls_ssl_session *session,
     return( 0 );
 }
 #endif /* MBEDTLS_SSL_PROTO_TLS1_2 */
+
+int mbedtls_ssl_validate_ciphersuite(
+    const mbedtls_ssl_context *ssl,
+    const mbedtls_ssl_ciphersuite_t *suite_info,
+    mbedtls_ssl_protocol_version min_tls_version,
+    mbedtls_ssl_protocol_version max_tls_version )
+{
+    (void) ssl;
+
+    if( suite_info == NULL )
+        return( -1 );
+
+    if( ( suite_info->min_tls_version > max_tls_version ) ||
+        ( suite_info->max_tls_version < min_tls_version ) )
+    {
+        return( -1 );
+    }
+
+#if defined(MBEDTLS_SSL_PROTO_TLS1_2) && defined(MBEDTLS_SSL_CLI_C)
+#if defined(MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED)
+    if( suite_info->key_exchange == MBEDTLS_KEY_EXCHANGE_ECJPAKE &&
+        mbedtls_ecjpake_check( &ssl->handshake->ecjpake_ctx ) != 0 )
+    {
+        return( -1 );
+    }
+#endif
+
+    /* Don't suggest PSK-based ciphersuite if no PSK is available. */
+#if defined(MBEDTLS_KEY_EXCHANGE_SOME_PSK_ENABLED)
+    if( mbedtls_ssl_ciphersuite_uses_psk( suite_info ) &&
+        mbedtls_ssl_conf_has_static_psk( ssl->conf ) == 0 )
+    {
+        return( -1 );
+    }
+#endif /* MBEDTLS_KEY_EXCHANGE_SOME_PSK_ENABLED */
+#endif /* MBEDTLS_SSL_PROTO_TLS1_2 */
+
+    return( 0 );
+}
 
 #endif /* MBEDTLS_SSL_TLS_C */

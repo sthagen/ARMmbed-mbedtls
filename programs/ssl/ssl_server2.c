@@ -65,7 +65,7 @@ int main( void )
 #include <windows.h>
 #endif
 
-#if defined(MBEDTLS_USE_PSA_CRYPTO)
+#if defined(MBEDTLS_USE_PSA_CRYPTO) || defined(MBEDTLS_SSL_PROTO_TLS1_3)
 #include "test/psa_crypto_helpers.h"
 #endif
 
@@ -1418,7 +1418,7 @@ int main( int argc, char *argv[] )
     int i;
     char *p, *q;
     const int *list;
-#if defined(MBEDTLS_USE_PSA_CRYPTO)
+#if defined(MBEDTLS_USE_PSA_CRYPTO) || defined(MBEDTLS_SSL_PROTO_TLS1_3)
     psa_status_t status;
 #endif
     unsigned char eap_tls_keymaterial[16];
@@ -1484,7 +1484,7 @@ int main( int argc, char *argv[] )
     mbedtls_ssl_cookie_init( &cookie_ctx );
 #endif
 
-#if defined(MBEDTLS_USE_PSA_CRYPTO)
+#if defined(MBEDTLS_USE_PSA_CRYPTO) || defined(MBEDTLS_SSL_PROTO_TLS1_3)
     status = psa_crypto_init();
     if( status != PSA_SUCCESS )
     {
@@ -2575,7 +2575,8 @@ int main( int argc, char *argv[] )
 #if defined(MBEDTLS_USE_PSA_CRYPTO)
     if( opt.key_opaque != 0 )
     {
-        if ( mbedtls_pk_get_type( &pkey ) == MBEDTLS_PK_ECKEY )
+        if ( mbedtls_pk_get_type( &pkey ) == MBEDTLS_PK_ECKEY ||
+             mbedtls_pk_get_type( &pkey ) == MBEDTLS_PK_RSA )
         {
             if( ( ret = mbedtls_pk_wrap_as_opaque( &pkey, &key_slot,
                                                 PSA_ALG_ANY_HASH ) ) != 0 )
@@ -2586,7 +2587,8 @@ int main( int argc, char *argv[] )
             }
         }
 
-        if ( mbedtls_pk_get_type( &pkey2 ) == MBEDTLS_PK_ECKEY )
+        if ( mbedtls_pk_get_type( &pkey2 ) == MBEDTLS_PK_ECKEY ||
+             mbedtls_pk_get_type( &pkey2 ) == MBEDTLS_PK_RSA )
         {
             if( ( ret = mbedtls_pk_wrap_as_opaque( &pkey2, &key_slot2,
                                                 PSA_ALG_ANY_HASH ) ) != 0 )
@@ -4142,7 +4144,7 @@ exit:
 #endif /* MBEDTLS_KEY_EXCHANGE_SOME_PSK_ENABLED &&
           MBEDTLS_USE_PSA_CRYPTO */
 
-#if defined(MBEDTLS_USE_PSA_CRYPTO)
+#if defined(MBEDTLS_USE_PSA_CRYPTO) || defined(MBEDTLS_SSL_PROTO_TLS1_3)
     const char* message = mbedtls_test_helper_is_psa_leaking();
     if( message )
     {
@@ -4154,8 +4156,8 @@ exit:
 
     /* For builds with MBEDTLS_TEST_USE_PSA_CRYPTO_RNG psa crypto
      * resources are freed by rng_free(). */
-#if defined(MBEDTLS_USE_PSA_CRYPTO) && \
-    !defined(MBEDTLS_TEST_USE_PSA_CRYPTO_RNG)
+#if ( defined(MBEDTLS_USE_PSA_CRYPTO) || defined(MBEDTLS_SSL_PROTO_TLS1_3) ) \
+    && !defined(MBEDTLS_TEST_USE_PSA_CRYPTO_RNG)
     mbedtls_psa_crypto_free( );
 #endif
 
