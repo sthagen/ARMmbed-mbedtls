@@ -14,94 +14,40 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from abc import ABCMeta
-from typing import Dict, Iterator, List
+from typing import Dict, List
 
-from . import test_case
 from . import test_data_generation
 from . import bignum_common
 
-class BignumModRawTarget(test_data_generation.BaseTarget, metaclass=ABCMeta):
-    #pylint: disable=abstract-method
+class BignumModRawTarget(test_data_generation.BaseTarget):
+    #pylint: disable=abstract-method, too-few-public-methods
     """Target for bignum mod_raw test case generation."""
     target_basename = 'test_suite_bignum_mod_raw.generated'
 
-class BignumModRawOperation(bignum_common.OperationCommon, BignumModRawTarget, metaclass=ABCMeta):
-    #pylint: disable=abstract-method
-    """Target for bignum mod_raw test case generation."""
-
-    def __init__(self, val_n: str, val_a: str, val_b: str = "0", bits_in_limb: int = 64) -> None:
-        super().__init__(val_a=val_a, val_b=val_b)
-        self.val_n = val_n
-        self.bits_in_limb = bits_in_limb
-
-    @property
-    def int_n(self) -> int:
-        return bignum_common.hex_to_int(self.val_n)
-
-    @property
-    def boundary(self) -> int:
-        data_in = [self.int_a, self.int_b, self.int_n]
-        return max([n for n in data_in if n is not None])
-
-    @property
-    def limbs(self) -> int:
-        return bignum_common.limbs_mpi(self.boundary, self.bits_in_limb)
-
-    @property
-    def hex_digits(self) -> int:
-        return 2 * (self.limbs * self.bits_in_limb // 8)
-
-    @property
-    def hex_n(self) -> str:
-        return "{:x}".format(self.int_n).zfill(self.hex_digits)
-
-    @property
-    def hex_a(self) -> str:
-        return "{:x}".format(self.int_a).zfill(self.hex_digits)
-
-    @property
-    def hex_b(self) -> str:
-        return "{:x}".format(self.int_b).zfill(self.hex_digits)
-
-    @property
-    def r(self) -> int: # pylint: disable=invalid-name
-        l = bignum_common.limbs_mpi(self.int_n, self.bits_in_limb)
-        return bignum_common.bound_mpi_limbs(l, self.bits_in_limb)
-
-    @property
-    def r_inv(self) -> int:
-        return bignum_common.invmod(self.r, self.int_n)
-
-    @property
-    def r2(self) -> int: # pylint: disable=invalid-name
-        return pow(self.r, 2)
-
-class BignumModRawOperationArchSplit(BignumModRawOperation):
-    #pylint: disable=abstract-method
-    """Common features for bignum mod raw operations where the result depends on
-    the limb size."""
-
-    limb_sizes = [32, 64] # type: List[int]
-
-    def __init__(self, val_n: str, val_a: str, val_b: str = "0", bits_in_limb: int = 64) -> None:
-        super().__init__(val_n=val_n, val_a=val_a, val_b=val_b, bits_in_limb=bits_in_limb)
-
-        if bits_in_limb not in self.limb_sizes:
-            raise ValueError("Invalid number of bits in limb!")
-
-        self.dependencies = ["MBEDTLS_HAVE_INT{:d}".format(bits_in_limb)]
-
-    @classmethod
-    def generate_function_tests(cls) -> Iterator[test_case.TestCase]:
-        for a_value, b_value in cls.get_value_pairs():
-            for bil in cls.limb_sizes:
-                yield cls(a_value, b_value, bits_in_limb=bil).create_test_case()
 # BEGIN MERGE SLOT 1
 
 # END MERGE SLOT 1
 
 # BEGIN MERGE SLOT 2
+
+class BignumModRawSub(bignum_common.ModOperationCommon,
+                      BignumModRawTarget):
+    """Test cases for bignum mpi_mod_raw_sub()."""
+    symbol = "-"
+    test_function = "mpi_mod_raw_sub"
+    test_name = "mbedtls_mpi_mod_raw_sub"
+    input_style = "fixed"
+    arity = 2
+
+    def arguments(self) -> List[str]:
+        return [bignum_common.quote_str(n) for n in [self.arg_a,
+                                                     self.arg_b,
+                                                     self.arg_n]
+               ] + self.result()
+
+    def result(self) -> List[str]:
+        result = (self.int_a - self.int_b) % self.int_n
+        return [self.format_result(result)]
 
 # END MERGE SLOT 2
 
@@ -115,6 +61,19 @@ class BignumModRawOperationArchSplit(BignumModRawOperation):
 
 # BEGIN MERGE SLOT 5
 
+class BignumModRawAdd(bignum_common.ModOperationCommon,
+                      BignumModRawTarget):
+    """Test cases for bignum mpi_mod_raw_add()."""
+    symbol = "+"
+    test_function = "mpi_mod_raw_add"
+    test_name = "mbedtls_mpi_mod_raw_add"
+    input_style = "fixed"
+    arity = 2
+
+    def result(self) -> List[str]:
+        result = (self.int_a + self.int_b) % self.int_n
+        return [self.format_result(result)]
+
 # END MERGE SLOT 5
 
 # BEGIN MERGE SLOT 6
@@ -122,6 +81,34 @@ class BignumModRawOperationArchSplit(BignumModRawOperation):
 # END MERGE SLOT 6
 
 # BEGIN MERGE SLOT 7
+
+class BignumModRawConvertToMont(bignum_common.ModOperationCommon,
+                                BignumModRawTarget):
+    """ Test cases for mpi_mod_raw_to_mont_rep(). """
+    test_function = "mpi_mod_raw_to_mont_rep"
+    test_name = "Convert into Mont: "
+    symbol = "R *"
+    input_style = "arch_split"
+    arity = 1
+
+    def result(self) -> List[str]:
+        result = (self.int_a * self.r) % self.int_n
+        return [self.format_result(result)]
+
+
+class BignumModRawConvertFromMont(bignum_common.ModOperationCommon,
+                                  BignumModRawTarget):
+    """ Test cases for mpi_mod_raw_from_mont_rep(). """
+    test_function = "mpi_mod_raw_from_mont_rep"
+    test_name = "Convert from Mont: "
+    symbol = "1/R *"
+    input_style = "arch_split"
+    arity = 1
+
+    def result(self) -> List[str]:
+        result = (self.int_a * self.r_inv) % self.int_n
+        return [self.format_result(result)]
+
 
 # END MERGE SLOT 7
 
