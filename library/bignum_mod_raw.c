@@ -120,9 +120,50 @@ void mbedtls_mpi_mod_raw_sub( mbedtls_mpi_uint *X,
     (void) mbedtls_mpi_core_add_if( X, N->p, N->limbs, (unsigned) c );
 }
 
+void mbedtls_mpi_mod_raw_mul( mbedtls_mpi_uint *X,
+                              const mbedtls_mpi_uint *A,
+                              const mbedtls_mpi_uint *B,
+                              const mbedtls_mpi_mod_modulus *N,
+                              mbedtls_mpi_uint *T )
+{
+    mbedtls_mpi_core_montmul( X, A, B, N->limbs, N->p, N->limbs,
+                              N->rep.mont.mm, T );
+}
+
 /* END MERGE SLOT 2 */
 
 /* BEGIN MERGE SLOT 3 */
+
+size_t mbedtls_mpi_mod_raw_inv_prime_working_limbs( size_t AN_limbs )
+{
+    /* mbedtls_mpi_mod_raw_inv_prime() needs a temporary for the exponent,
+     * which will be the same size as the modulus and input (AN_limbs),
+     * and additional space to pass to mbedtls_mpi_core_exp_mod(). */
+    return( AN_limbs +
+            mbedtls_mpi_core_exp_mod_working_limbs( AN_limbs, AN_limbs ) );
+}
+
+void mbedtls_mpi_mod_raw_inv_prime( mbedtls_mpi_uint *X,
+                                    const mbedtls_mpi_uint *A,
+                                    const mbedtls_mpi_uint *N,
+                                    size_t AN_limbs,
+                                    const mbedtls_mpi_uint *RR,
+                                    mbedtls_mpi_uint *T )
+{
+    /* Inversion by power: g^|G| = 1 => g^(-1) = g^(|G|-1), and
+     *                       |G| = N - 1, so we want
+     *                 g^(|G|-1) = g^(N - 2)
+     */
+
+    /* Use the first AN_limbs of T to hold N - 2 */
+    mbedtls_mpi_uint *Nminus2 = T;
+    (void) mbedtls_mpi_core_sub_int( Nminus2, N, 2, AN_limbs );
+
+    /* Rest of T is given to exp_mod for its working space */
+    mbedtls_mpi_core_exp_mod( X,
+                              A, N, AN_limbs, Nminus2, AN_limbs,
+                              RR, T + AN_limbs );
+}
 
 /* END MERGE SLOT 3 */
 
@@ -152,13 +193,13 @@ int mbedtls_mpi_mod_raw_to_mont_rep( mbedtls_mpi_uint *X,
                                      const mbedtls_mpi_mod_modulus *m )
 {
     mbedtls_mpi_uint *T;
-    const size_t t_limbs = m->limbs * 2 + 1;
+    const size_t t_limbs = mbedtls_mpi_core_montmul_working_limbs( m->limbs );
 
     if( ( T = (mbedtls_mpi_uint *) mbedtls_calloc( t_limbs, ciL ) ) == NULL )
         return( MBEDTLS_ERR_MPI_ALLOC_FAILED );
 
-    mbedtls_mpi_core_montmul( X, X, m->rep.mont.rr, m->limbs, m->p, m->limbs,
-                              m->rep.mont.mm, T );
+    mbedtls_mpi_core_to_mont_rep( X, X, m->p, m->limbs,
+                                  m->rep.mont.mm, m->rep.mont.rr, T );
 
     mbedtls_platform_zeroize( T, t_limbs * ciL );
     mbedtls_free( T );
@@ -168,19 +209,29 @@ int mbedtls_mpi_mod_raw_to_mont_rep( mbedtls_mpi_uint *X,
 int mbedtls_mpi_mod_raw_from_mont_rep( mbedtls_mpi_uint *X,
                                        const mbedtls_mpi_mod_modulus *m )
 {
-    const mbedtls_mpi_uint one = 1;
-    const size_t t_limbs = m->limbs * 2 + 1;
+    const size_t t_limbs = mbedtls_mpi_core_montmul_working_limbs( m->limbs );
     mbedtls_mpi_uint *T;
 
     if( ( T = (mbedtls_mpi_uint *) mbedtls_calloc( t_limbs, ciL ) ) == NULL )
         return( MBEDTLS_ERR_MPI_ALLOC_FAILED );
 
-    mbedtls_mpi_core_montmul( X, X, &one, 1, m->p, m->limbs,
-                              m->rep.mont.mm, T );
+    mbedtls_mpi_core_from_mont_rep( X, X, m->p, m->limbs, m->rep.mont.mm, T );
 
     mbedtls_platform_zeroize( T, t_limbs * ciL );
     mbedtls_free( T );
     return( 0 );
+}
+
+void mbedtls_mpi_mod_raw_neg( mbedtls_mpi_uint *X,
+                              const mbedtls_mpi_uint *A,
+                              const mbedtls_mpi_mod_modulus *m )
+{
+    mbedtls_mpi_core_sub( X, m->p, A, m->limbs );
+
+    /* If A=0 initially, then X=N now. Detect this by
+     * subtracting N and catching the carry. */
+    mbedtls_mpi_uint borrow = mbedtls_mpi_core_sub( X, X, m->p, m->limbs );
+    (void) mbedtls_mpi_core_add_if( X, m->p, m->limbs, (unsigned) borrow  );
 }
 /* END MERGE SLOT 7 */
 
