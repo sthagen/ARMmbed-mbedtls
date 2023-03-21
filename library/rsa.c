@@ -503,9 +503,24 @@ int mbedtls_rsa_set_padding(mbedtls_rsa_context *ctx, int padding,
 }
 
 /*
+ * Get padding mode of initialized RSA context
+ */
+int mbedtls_rsa_get_padding_mode(const mbedtls_rsa_context *ctx)
+{
+    return ctx->padding;
+}
+
+/*
+ * Get hash identifier of mbedtls_md_type_t type
+ */
+int mbedtls_rsa_get_md_alg(const mbedtls_rsa_context *ctx)
+{
+    return ctx->hash_id;
+}
+
+/*
  * Get length in bytes of RSA modulus
  */
-
 size_t mbedtls_rsa_get_len(const mbedtls_rsa_context *ctx)
 {
     return ctx->len;
@@ -2344,7 +2359,7 @@ void mbedtls_rsa_free(mbedtls_rsa_context *ctx)
 
 #if defined(MBEDTLS_SELF_TEST)
 
-#include "mbedtls/sha1.h"
+#include "mbedtls/md.h"
 
 /*
  * Example RSA-1024 keypair, for test purposes
@@ -2508,7 +2523,8 @@ int mbedtls_rsa_self_test(int verbose)
         mbedtls_printf("  PKCS#1 data sign  : ");
     }
 
-    if (mbedtls_sha1(rsa_plaintext, PT_LEN, sha1sum) != 0) {
+    if (mbedtls_md(mbedtls_md_info_from_type(MBEDTLS_MD_SHA1),
+                   rsa_plaintext, PT_LEN, sha1sum) != 0) {
         if (verbose != 0) {
             mbedtls_printf("failed\n");
         }

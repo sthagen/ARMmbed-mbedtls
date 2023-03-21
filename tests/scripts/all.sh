@@ -1230,8 +1230,9 @@ component_test_crypto_full_md_light_only () {
     scripts/config.py unset MBEDTLS_PKCS7_C
     # Disable indirect dependencies of MD
     scripts/config.py unset MBEDTLS_ECDSA_DETERMINISTIC # needs HMAC_DRBG
-    # Enable "light" subset of MD
-    make CFLAGS="$ASAN_CFLAGS -DMBEDTLS_MD_LIGHT" LDFLAGS="$ASAN_CFLAGS"
+    # Note: MD-light is auto-enabled in build_info.h by modules that need it,
+    # which we haven't disabled, so no need to explicitly enable it.
+    make CFLAGS="$ASAN_CFLAGS" LDFLAGS="$ASAN_CFLAGS"
 
     # Make sure we don't have the HMAC functions, but the hashing functions
     not grep mbedtls_md_hmac library/md.o
@@ -2353,8 +2354,6 @@ config_psa_crypto_config_ecjpake_use_psa () {
         # Disable the module that's accelerated
         scripts/config.py unset MBEDTLS_ECJPAKE_C
     fi
-    # Disable things that depend on it (regardless of driver or built-in)
-    scripts/config.py unset MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED
 
     # Dynamic secure element support is a deprecated feature and needs to be disabled here.
     # This is done to have the same form of psa_key_attributes_s for libdriver and library.
@@ -2398,8 +2397,8 @@ component_test_psa_crypto_config_accel_ecjpake_use_psa () {
     msg "test: MBEDTLS_PSA_CRYPTO_CONFIG with accelerated JPAKE + USE_PSA"
     make test
 
-    # ssl-opt will be added later. Please check issue 7255 for a list of
-    # follow up activities
+    msg "test: ssl-opt.sh"
+    tests/ssl-opt.sh
 }
 
 # Keep in sync with component_test_psa_crypto_config_accel_ecjpake_use_psa.
@@ -2418,8 +2417,66 @@ component_test_psa_crypto_config_reference_ecjpake_use_psa () {
     msg "test: MBEDTLS_PSA_CRYPTO_CONFIG with reference ECJPAKE + USE_PSA"
     make test
 
-    # ssl-opt will be added later. Please check issue 7255 for a list of
-    # follow up activities
+    msg "test: ssl-opt.sh"
+    tests/ssl-opt.sh
+}
+
+component_test_psa_crypto_config_accel_ecc () {
+    msg "test: MBEDTLS_PSA_CRYPTO_CONFIG with accelerated ECC"
+
+    # Algorithms and key types to accelerate
+    loc_accel_list="ALG_ECDH ALG_ECDSA ALG_DETERMINISTIC_ECDSA ALG_JPAKE KEY_TYPE_ECC_KEY_PAIR KEY_TYPE_ECC_PUBLIC_KEY"
+
+    # Configure and build the test driver library
+    # --------------------------------------------
+
+    # Disable ALG_STREAM_CIPHER and ALG_ECB_NO_PADDING to avoid having
+    # partial support for cipher operations in the driver test library.
+    scripts/config.py -f include/psa/crypto_config.h unset PSA_WANT_ALG_STREAM_CIPHER
+    scripts/config.py -f include/psa/crypto_config.h unset PSA_WANT_ALG_ECB_NO_PADDING
+
+    loc_accel_flags=$( echo "$loc_accel_list" | sed 's/[^ ]* */-DLIBTESTDRIVER1_MBEDTLS_PSA_ACCEL_&/g' )
+    # These hashes are needed for some ECDSA signature tests.
+    loc_accel_flags="$loc_accel_flags -DLIBTESTDRIVER1_MBEDTLS_PSA_ACCEL_ALG_SHA_224"
+    loc_accel_flags="$loc_accel_flags -DLIBTESTDRIVER1_MBEDTLS_PSA_ACCEL_ALG_SHA_256"
+    loc_accel_flags="$loc_accel_flags -DLIBTESTDRIVER1_MBEDTLS_PSA_ACCEL_ALG_SHA_384"
+    loc_accel_flags="$loc_accel_flags -DLIBTESTDRIVER1_MBEDTLS_PSA_ACCEL_ALG_SHA_512"
+    make -C tests libtestdriver1.a CFLAGS="$ASAN_CFLAGS $loc_accel_flags" LDFLAGS="$ASAN_CFLAGS"
+
+    # Configure and build the main libraries
+    # ---------------------------------------
+
+    # start with default + driver support
+    scripts/config.py set MBEDTLS_PSA_CRYPTO_DRIVERS
+    scripts/config.py set MBEDTLS_PSA_CRYPTO_CONFIG
+
+    # disable modules for which we have drivers
+    scripts/config.py unset MBEDTLS_ECDSA_C
+    scripts/config.py unset MBEDTLS_ECDH_C
+    scripts/config.py unset MBEDTLS_ECJPAKE_C
+
+    # dependencies
+    #scripts/config.py unset MBEDTLS_SSL_PROTO_TLS1_3 # not in default anyway
+    scripts/config.py unset MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED
+    scripts/config.py unset MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA_ENABLED
+    scripts/config.py unset MBEDTLS_KEY_EXCHANGE_ECDH_RSA_ENABLED
+    scripts/config.py unset MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED
+    scripts/config.py unset MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED
+
+    # build and link with test drivers
+    loc_accel_flags="$loc_accel_flags $( echo "$loc_accel_list" | sed 's/[^ ]* */-DMBEDTLS_PSA_ACCEL_&/g' )"
+    make CFLAGS="$ASAN_CFLAGS -I../tests/include -I../tests -I../../tests -DPSA_CRYPTO_DRIVER_TEST -DMBEDTLS_TEST_LIBTESTDRIVER1 $loc_accel_flags" LDFLAGS="-ltestdriver1 $ASAN_CFLAGS"
+
+    # make sure these were not auto-re-enabled by accident
+    not grep mbedtls_ecdh_ library/ecdh.o
+    not grep mbedtls_ecdsa_ library/ecdsa.o
+    not grep mbedtls_ecjpake_ library/ecjpake.o
+
+    # Run the tests
+    # -------------
+
+    msg "test: MBEDTLS_PSA_CRYPTO_CONFIG with accelerated ECC"
+    make test
 }
 
 component_test_psa_crypto_config_accel_rsa_signature () {
@@ -2616,8 +2673,9 @@ component_test_psa_crypto_config_accel_hash_use_psa () {
     make CFLAGS="$ASAN_CFLAGS -Werror -I../tests/include -I../tests -I../../tests -DPSA_CRYPTO_DRIVER_TEST -DMBEDTLS_TEST_LIBTESTDRIVER1 $loc_accel_flags" LDFLAGS="-ltestdriver1 $ASAN_CFLAGS" all
 
     # There's a risk of something getting re-enabled via config_psa.h;
-    # make sure it did not happen.
-    not grep mbedtls_md library/md.o
+    # make sure it did not happen. Note: it's OK for MD_LIGHT to be enabled,
+    # but not the full MD_C (for now), so check mbedtls_md_hmac for that.
+    not grep mbedtls_md_hmac library/md.o
     not grep mbedtls_md5 library/md5.o
     not grep mbedtls_sha1 library/sha1.o
     not grep mbedtls_sha256 library/sha256.o
