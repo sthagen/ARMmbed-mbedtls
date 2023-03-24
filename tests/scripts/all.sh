@@ -1224,12 +1224,15 @@ component_test_crypto_full_md_light_only () {
     scripts/config.py crypto_full
     # Disable MD
     scripts/config.py unset MBEDTLS_MD_C
-    # Disable direct dependencies of MD
+    # Disable direct dependencies of MD_C
     scripts/config.py unset MBEDTLS_HKDF_C
     scripts/config.py unset MBEDTLS_HMAC_DRBG_C
     scripts/config.py unset MBEDTLS_PKCS7_C
-    # Disable indirect dependencies of MD
+    # Disable indirect dependencies of MD_C
     scripts/config.py unset MBEDTLS_ECDSA_DETERMINISTIC # needs HMAC_DRBG
+    # Disable things that would auto-enable MD_C
+    scripts/config.py unset MBEDTLS_PKCS5_C
+
     # Note: MD-light is auto-enabled in build_info.h by modules that need it,
     # which we haven't disabled, so no need to explicitly enable it.
     make CFLAGS="$ASAN_CFLAGS" LDFLAGS="$ASAN_CFLAGS"
@@ -2254,20 +2257,6 @@ config_psa_crypto_config_ecdh_use_psa () {
         # Disable the module that's accelerated
         scripts/config.py unset MBEDTLS_ECDH_C
     fi
-    # Disable things that depend on it (regardless of driver or built-in)
-    scripts/config.py unset MBEDTLS_KEY_EXCHANGE_ECDH_RSA_ENABLED
-    scripts/config.py unset MBEDTLS_KEY_EXCHANGE_ECDH_ECDSA_ENABLED
-    scripts/config.py unset MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED
-    scripts/config.py unset MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED
-    scripts/config.py unset MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED
-
-    scripts/config.py unset MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ENABLED
-    scripts/config.py unset MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL_ENABLED
-    # Note: the above two lines should be enough, but currently there's a bug
-    # that prevents tests from passing TLS 1.3 with only PSK (no ephemeral)
-    # when TLS 1.2 is also enabled, see #6848.
-    # So, as a temporary measure disable all of TLS 1.3.
-    scripts/config.py unset MBEDTLS_SSL_PROTO_TLS1_3
 
     # Restartable feature is not yet supported by PSA. Once it will in
     # the future, the following line could be removed (see issues
@@ -2637,15 +2626,6 @@ config_psa_crypto_hash_use_psa () {
     scripts/config.py unset MBEDTLS_ENTROPY_C
     scripts/config.py unset MBEDTLS_ENTROPY_NV_SEED # depends on ENTROPY_C
     scripts/config.py unset MBEDTLS_PLATFORM_NV_SEED_ALT # depends on former
-    # Also unset MD_C and things that depend on it.
-    if [ "$DRIVER_ONLY" -eq 1 ]; then
-        scripts/config.py unset MBEDTLS_MD_C
-    fi
-    scripts/config.py unset MBEDTLS_HKDF_C # has independent PSA implementation
-    scripts/config.py unset MBEDTLS_HMAC_DRBG_C
-    scripts/config.py unset MBEDTLS_PKCS7_C
-    scripts/config.py unset MBEDTLS_ECDSA_DETERMINISTIC
-    scripts/config.py -f include/psa/crypto_config.h unset PSA_WANT_ALG_DETERMINISTIC_ECDSA
 
     # Dynamic secure element support is a deprecated feature and needs to be disabled here.
     # This is done to have the same form of psa_key_attributes_s for libdriver and library.
@@ -2673,9 +2653,7 @@ component_test_psa_crypto_config_accel_hash_use_psa () {
     make CFLAGS="$ASAN_CFLAGS -Werror -I../tests/include -I../tests -I../../tests -DPSA_CRYPTO_DRIVER_TEST -DMBEDTLS_TEST_LIBTESTDRIVER1 $loc_accel_flags" LDFLAGS="-ltestdriver1 $ASAN_CFLAGS" all
 
     # There's a risk of something getting re-enabled via config_psa.h;
-    # make sure it did not happen. Note: it's OK for MD_LIGHT to be enabled,
-    # but not the full MD_C (for now), so check mbedtls_md_hmac for that.
-    not grep mbedtls_md_hmac library/md.o
+    # make sure it did not happen. Note: it's OK for MD_C to be enabled.
     not grep mbedtls_md5 library/md5.o
     not grep mbedtls_sha1 library/sha1.o
     not grep mbedtls_sha256 library/sha256.o
