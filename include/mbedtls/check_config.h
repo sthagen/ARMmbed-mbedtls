@@ -66,10 +66,6 @@
 #error "MBEDTLS_HAVE_TIME_DATE without MBEDTLS_HAVE_TIME does not make sense"
 #endif
 
-#if defined(MBEDTLS_AESNI_C) && !defined(MBEDTLS_HAVE_ASM)
-#error "MBEDTLS_AESNI_C defined, but not all prerequisites"
-#endif
-
 #if defined(__aarch64__) && defined(__GNUC__)
 /* We don't do anything with MBEDTLS_AESCE_C on systems without ^ these two */
 #if defined(MBEDTLS_AESCE_C) && !defined(MBEDTLS_HAVE_ASM)
@@ -499,6 +495,16 @@
 #error "MBEDTLS_PLATFORM_TIME_MACRO defined, but not all prerequisites"
 #endif
 
+#if defined(MBEDTLS_PLATFORM_MS_TIME_TYPE_MACRO) &&\
+    ( !defined(MBEDTLS_PLATFORM_C) || !defined(MBEDTLS_HAVE_TIME) )
+#error "MBEDTLS_PLATFORM_MS_TIME_TYPE_MACRO defined, but not all prerequisites"
+#endif
+
+#if defined(MBEDTLS_PLATFORM_MS_TIME_ALT)   && \
+    ( !defined(MBEDTLS_PLATFORM_C) || !defined(MBEDTLS_HAVE_TIME) )
+#error "MBEDTLS_PLATFORM_MS_TIME_ALT defined, but not all prerequisites"
+#endif
+
 #if defined(MBEDTLS_PLATFORM_TIME_TYPE_MACRO) &&\
     ( !defined(MBEDTLS_PLATFORM_C) ||\
         !defined(MBEDTLS_HAVE_TIME) )
@@ -802,14 +808,14 @@
 #endif
 
 #if defined(MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ENABLED)
-#if !( defined(MBEDTLS_PK_HAVE_ECDH) && defined(MBEDTLS_X509_CRT_PARSE_C) && \
+#if !( defined(PSA_WANT_ALG_ECDH) && defined(MBEDTLS_X509_CRT_PARSE_C) && \
        ( defined(MBEDTLS_PK_HAVE_ECDSA) || defined(MBEDTLS_PKCS1_V21) ) )
 #error "MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ENABLED defined, but not all prerequisites"
 #endif
 #endif
 
 #if defined(MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL_ENABLED)
-#if !( defined(MBEDTLS_PK_HAVE_ECDH) )
+#if !( defined(PSA_WANT_ALG_ECDH) )
 #error "MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL_ENABLED defined, but not all prerequisites"
 #endif
 #endif
