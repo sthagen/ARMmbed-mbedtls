@@ -48,6 +48,14 @@
 #include "mbedtls/pkcs12.h"
 #endif
 
+#if defined(MBEDTLS_PSA_CRYPTO_C)
+#include "mbedtls/psa_util.h"
+#endif
+
+#if defined(MBEDTLS_USE_PSA_CRYPTO)
+#include "psa/crypto.h"
+#endif
+
 #include "mbedtls/platform.h"
 
 #if defined(MBEDTLS_FS_IO)
@@ -155,7 +163,7 @@ int mbedtls_pk_parse_public_keyfile(mbedtls_pk_context *ctx, const char *path)
 }
 #endif /* MBEDTLS_FS_IO */
 
-#if defined(MBEDTLS_ECP_C)
+#if defined(MBEDTLS_ECP_LIGHT)
 /* Minimally parse an ECParameters buffer to and mbedtls_asn1_buf
  *
  * ECParameters ::= CHOICE {
@@ -511,7 +519,7 @@ static int pk_get_ecpubkey(unsigned char **p, const unsigned char *end,
 
     return ret;
 }
-#endif /* MBEDTLS_ECP_C */
+#endif /* MBEDTLS_ECP_LIGHT */
 
 #if defined(MBEDTLS_RSA_C)
 /*
@@ -657,14 +665,14 @@ int mbedtls_pk_parse_subpubkey(unsigned char **p, const unsigned char *end,
         ret = pk_get_rsapubkey(p, end, mbedtls_pk_rsa(*pk));
     } else
 #endif /* MBEDTLS_RSA_C */
-#if defined(MBEDTLS_ECP_C)
+#if defined(MBEDTLS_ECP_LIGHT)
     if (pk_alg == MBEDTLS_PK_ECKEY_DH || pk_alg == MBEDTLS_PK_ECKEY) {
         ret = pk_use_ecparams(&alg_params, &mbedtls_pk_ec(*pk)->grp);
         if (ret == 0) {
             ret = pk_get_ecpubkey(p, end, mbedtls_pk_ec(*pk));
         }
     } else
-#endif /* MBEDTLS_ECP_C */
+#endif /* MBEDTLS_ECP_LIGHT */
     ret = MBEDTLS_ERR_PK_UNKNOWN_PK_ALG;
 
     if (ret == 0 && *p != end) {
@@ -868,7 +876,58 @@ cleanup:
 }
 #endif /* MBEDTLS_RSA_C */
 
-#if defined(MBEDTLS_ECP_C)
+#if defined(MBEDTLS_ECP_LIGHT)
+#if defined(MBEDTLS_USE_PSA_CRYPTO)
+/*
+ * Helper function for deriving a public key from its private counterpart by
+ * using PSA functions.
+ */
+static int pk_derive_public_key(mbedtls_ecp_group *grp, mbedtls_ecp_point *Q,
+                                const mbedtls_mpi *d)
+{
+    psa_status_t status, destruction_status;
+    psa_key_attributes_t key_attr = PSA_KEY_ATTRIBUTES_INIT;
+    size_t curve_bits;
+    psa_ecc_family_t curve = mbedtls_ecc_group_to_psa(grp->id, &curve_bits);
+    /* This buffer is used to store the private key at first and then the
+     * public one (but not at the same time). Therefore we size it for the
+     * latter since it's bigger. */
+    unsigned char key_buf[MBEDTLS_PSA_MAX_EC_PUBKEY_LENGTH];
+    size_t key_len = PSA_BITS_TO_BYTES(curve_bits);
+    mbedtls_svc_key_id_t key_id = MBEDTLS_SVC_KEY_ID_INIT;
+    int ret;
+
+    psa_set_key_type(&key_attr, PSA_KEY_TYPE_ECC_KEY_PAIR(curve));
+    psa_set_key_usage_flags(&key_attr, PSA_KEY_USAGE_EXPORT);
+
+    ret = mbedtls_mpi_write_binary(d, key_buf, key_len);
+    if (ret != 0) {
+        return ret;
+    }
+
+    status = psa_import_key(&key_attr, key_buf, key_len, &key_id);
+    ret = psa_pk_status_to_mbedtls(status);
+    if (ret != 0) {
+        return ret;
+    }
+
+    mbedtls_platform_zeroize(key_buf, sizeof(key_buf));
+
+    status = psa_export_public_key(key_id, key_buf, sizeof(key_buf), &key_len);
+    ret = psa_pk_status_to_mbedtls(status);
+    destruction_status = psa_destroy_key(key_id);
+    if (ret != 0) {
+        return ret;
+    } else if (destruction_status != PSA_SUCCESS) {
+        return psa_pk_status_to_mbedtls(destruction_status);
+    }
+
+    ret = mbedtls_ecp_point_read_binary(grp, Q, key_buf, key_len);
+
+    return ret;
+}
+#endif /* MBEDTLS_USE_PSA_CRYPTO */
+
 /*
  * Parse a SEC1 encoded private EC key
  */
@@ -975,11 +1034,21 @@ static int pk_parse_key_sec1_der(mbedtls_ecp_keypair *eck,
         }
     }
 
-    if (!pubkey_done &&
-        (ret = mbedtls_ecp_mul(&eck->grp, &eck->Q, &eck->d, &eck->grp.G,
-                               f_rng, p_rng)) != 0) {
-        mbedtls_ecp_keypair_free(eck);
-        return MBEDTLS_ERROR_ADD(MBEDTLS_ERR_PK_KEY_INVALID_FORMAT, ret);
+    if (!pubkey_done) {
+#if defined(MBEDTLS_USE_PSA_CRYPTO)
+        (void) f_rng;
+        (void) p_rng;
+        if ((ret = pk_derive_public_key(&eck->grp, &eck->Q, &eck->d)) != 0) {
+            mbedtls_ecp_keypair_free(eck);
+            return ret;
+        }
+#else /* MBEDTLS_USE_PSA_CRYPTO */
+        if ((ret = mbedtls_ecp_mul(&eck->grp, &eck->Q, &eck->d, &eck->grp.G,
+                                   f_rng, p_rng)) != 0) {
+            mbedtls_ecp_keypair_free(eck);
+            return MBEDTLS_ERROR_ADD(MBEDTLS_ERR_PK_KEY_INVALID_FORMAT, ret);
+        }
+#endif /* MBEDTLS_USE_PSA_CRYPTO */
     }
 
     if ((ret = mbedtls_ecp_check_privkey(&eck->grp, &eck->d)) != 0) {
@@ -989,7 +1058,7 @@ static int pk_parse_key_sec1_der(mbedtls_ecp_keypair *eck,
 
     return 0;
 }
-#endif /* MBEDTLS_ECP_C */
+#endif /* MBEDTLS_ECP_LIGHT */
 
 /*
  * Parse an unencrypted PKCS#8 encoded private key
@@ -1082,7 +1151,7 @@ static int pk_parse_key_pkcs8_unencrypted_der(
         }
     } else
 #endif /* MBEDTLS_RSA_C */
-#if defined(MBEDTLS_ECP_C)
+#if defined(MBEDTLS_ECP_LIGHT)
     if (pk_alg == MBEDTLS_PK_ECKEY || pk_alg == MBEDTLS_PK_ECKEY_DH) {
         if ((ret = pk_use_ecparams(&params, &mbedtls_pk_ec(*pk)->grp)) != 0 ||
             (ret = pk_parse_key_sec1_der(mbedtls_pk_ec(*pk), p, len, f_rng, p_rng)) != 0) {
@@ -1090,7 +1159,7 @@ static int pk_parse_key_pkcs8_unencrypted_der(
             return ret;
         }
     } else
-#endif /* MBEDTLS_ECP_C */
+#endif /* MBEDTLS_ECP_LIGHT */
     return MBEDTLS_ERR_PK_UNKNOWN_PK_ALG;
 
     return 0;
@@ -1257,7 +1326,7 @@ int mbedtls_pk_parse_key(mbedtls_pk_context *pk,
     }
 #endif /* MBEDTLS_RSA_C */
 
-#if defined(MBEDTLS_ECP_C)
+#if defined(MBEDTLS_ECP_LIGHT)
     /* Avoid calling mbedtls_pem_read_buffer() on non-null-terminated string */
     if (key[keylen - 1] != '\0') {
         ret = MBEDTLS_ERR_PEM_NO_HEADER_FOOTER_PRESENT;
@@ -1286,7 +1355,7 @@ int mbedtls_pk_parse_key(mbedtls_pk_context *pk,
     } else if (ret != MBEDTLS_ERR_PEM_NO_HEADER_FOOTER_PRESENT) {
         return ret;
     }
-#endif /* MBEDTLS_ECP_C */
+#endif /* MBEDTLS_ECP_LIGHT */
 
     /* Avoid calling mbedtls_pem_read_buffer() on non-null-terminated string */
     if (key[keylen - 1] != '\0') {
@@ -1392,7 +1461,7 @@ int mbedtls_pk_parse_key(mbedtls_pk_context *pk,
     mbedtls_pk_init(pk);
 #endif /* MBEDTLS_RSA_C */
 
-#if defined(MBEDTLS_ECP_C)
+#if defined(MBEDTLS_ECP_LIGHT)
     pk_info = mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY);
     if (mbedtls_pk_setup(pk, pk_info) == 0 &&
         pk_parse_key_sec1_der(mbedtls_pk_ec(*pk),
@@ -1400,7 +1469,7 @@ int mbedtls_pk_parse_key(mbedtls_pk_context *pk,
         return 0;
     }
     mbedtls_pk_free(pk);
-#endif /* MBEDTLS_ECP_C */
+#endif /* MBEDTLS_ECP_LIGHT */
 
     /* If MBEDTLS_RSA_C is defined but MBEDTLS_ECP_C isn't,
      * it is ok to leave the PK context initialized but not

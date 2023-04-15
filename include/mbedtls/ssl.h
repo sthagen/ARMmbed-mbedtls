@@ -40,6 +40,8 @@
 #include "mbedtls/dhm.h"
 #endif
 
+#include "mbedtls/md.h"
+
 #if defined(MBEDTLS_ECDH_C)
 #include "mbedtls/ecdh.h"
 #endif
@@ -106,7 +108,8 @@
 /* Error space gap */
 /* Error space gap */
 /* Error space gap */
-/* Error space gap */
+/** Cache entry not found */
+#define MBEDTLS_ERR_SSL_CACHE_ENTRY_NOT_FOUND             -0x7E80
 /** Memory allocation failed */
 #define MBEDTLS_ERR_SSL_ALLOC_FAILED                      -0x7F00
 /** Hardware acceleration function returned with error */
@@ -1483,7 +1486,7 @@ struct mbedtls_ssl_config {
     const uint16_t *MBEDTLS_PRIVATE(sig_algs);      /*!< allowed signature algorithms       */
 #endif /* MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED */
 
-#if defined(MBEDTLS_ECP_C) && !defined(MBEDTLS_DEPRECATED_REMOVED)
+#if defined(MBEDTLS_ECP_LIGHT) && !defined(MBEDTLS_DEPRECATED_REMOVED)
     const mbedtls_ecp_group_id *MBEDTLS_PRIVATE(curve_list); /*!< allowed curves             */
 #endif
 
@@ -3618,7 +3621,7 @@ void mbedtls_ssl_conf_dhm_min_bitlen(mbedtls_ssl_config *conf,
                                      unsigned int bitlen);
 #endif /* MBEDTLS_DHM_C && MBEDTLS_SSL_CLI_C */
 
-#if defined(MBEDTLS_ECP_C)
+#if defined(MBEDTLS_ECP_LIGHT)
 #if !defined(MBEDTLS_DEPRECATED_REMOVED)
 /**
  * \brief          Set the allowed curves in order of preference.
@@ -3664,7 +3667,7 @@ void mbedtls_ssl_conf_dhm_min_bitlen(mbedtls_ssl_config *conf,
 void MBEDTLS_DEPRECATED mbedtls_ssl_conf_curves(mbedtls_ssl_config *conf,
                                                 const mbedtls_ecp_group_id *curves);
 #endif /* MBEDTLS_DEPRECATED_REMOVED */
-#endif /* MBEDTLS_ECP_C */
+#endif /* MBEDTLS_ECP_LIGHT */
 
 /**
  * \brief          Set the allowed groups in order of preference.
