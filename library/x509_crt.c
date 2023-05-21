@@ -50,6 +50,7 @@
 #endif /* MBEDTLS_USE_PSA_CRYPTO */
 #include "hash_info.h"
 #include "x509_invasive.h"
+#include "pk_internal.h"
 
 #include "mbedtls/platform.h"
 
@@ -237,7 +238,7 @@ static int x509_profile_check_key(const mbedtls_x509_crt_profile *profile,
     if (pk_alg == MBEDTLS_PK_ECDSA ||
         pk_alg == MBEDTLS_PK_ECKEY ||
         pk_alg == MBEDTLS_PK_ECKEY_DH) {
-        const mbedtls_ecp_group_id gid = mbedtls_pk_ec(*pk)->grp.id;
+        const mbedtls_ecp_group_id gid = mbedtls_pk_ec_ro(*pk)->grp.id;
 
         if (gid == MBEDTLS_ECP_DP_NONE) {
             return -1;
@@ -2813,7 +2814,6 @@ static int x509_inet_pton_ipv6(const char *src, void *dst)
 
 static int x509_inet_pton_ipv4(const char *src, void *dst)
 {
-    /* note: allows leading 0's, e.g. 000.000.000.000 */
     const unsigned char *p = (const unsigned char *) src;
     uint8_t *res = (uint8_t *) dst;
     uint8_t digit, num_digits = 0;
@@ -2827,13 +2827,20 @@ static int x509_inet_pton_ipv4(const char *src, void *dst)
             if (digit > 9) {
                 break;
             }
+
+            /* Don't allow leading zeroes. These might mean octal format,
+             * which this implementation does not support. */
+            if (octet == 0 && num_digits > 0) {
+                return -1;
+            }
+
             octet = octet * 10 + digit;
             num_digits++;
             p++;
         } while (num_digits < 3);
 
         if (octet >= 256 || num_digits > 3 || num_digits == 0) {
-            break;
+            return -1;
         }
         *res++ = (uint8_t) octet;
         num_octets++;
@@ -3195,6 +3202,7 @@ void mbedtls_x509_crt_free(mbedtls_x509_crt *crt)
         mbedtls_asn1_sequence_free(cert_cur->ext_key_usage.next);
         mbedtls_asn1_sequence_free(cert_cur->subject_alt_names.next);
         mbedtls_asn1_sequence_free(cert_cur->certificate_policies.next);
+        mbedtls_asn1_sequence_free(cert_cur->authority_key_id.authorityCertIssuer.next);
 
         if (cert_cur->raw.p != NULL && cert_cur->own_buffer) {
             mbedtls_platform_zeroize(cert_cur->raw.p, cert_cur->raw.len);
