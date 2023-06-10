@@ -411,6 +411,18 @@ check_tools()
     done
 }
 
+pre_parse_command_line_for_dirs () {
+    # Make an early pass through the options given, so we can set directories
+    # for Arm compilers, before SUPPORTED_COMPONENTS is determined.
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --armc5-bin-dir) shift; ARMC5_BIN_DIR="$1";;
+            --armc6-bin-dir) shift; ARMC6_BIN_DIR="$1";;
+        esac
+        shift
+    done
+}
+
 pre_parse_command_line () {
     COMMAND_LINE_COMPONENTS=
     all_except=0
@@ -427,8 +439,8 @@ pre_parse_command_line () {
             --arm-none-eabi-gcc-prefix) shift; ARM_NONE_EABI_GCC_PREFIX="$1";;
             --arm-linux-gnueabi-gcc-prefix) shift; ARM_LINUX_GNUEABI_GCC_PREFIX="$1";;
             --armcc) no_armcc=;;
-            --armc5-bin-dir) shift; ARMC5_BIN_DIR="$1";;
-            --armc6-bin-dir) shift; ARMC6_BIN_DIR="$1";;
+            --armc5-bin-dir) shift; ;; # assignment to ARMC5_BIN_DIR done in pre_parse_command_line_for_dirs
+            --armc6-bin-dir) shift; ;; # assignment to ARMC6_BIN_DIR done in pre_parse_command_line_for_dirs
             --error-test) error_test=$((error_test + 1));;
             --except) all_except=1;;
             --force|-f) FORCE=1;;
@@ -3836,7 +3848,7 @@ component_build_arm_none_eabi_gcc () {
     make CC="${ARM_NONE_EABI_GCC_PREFIX}gcc" AR="${ARM_NONE_EABI_GCC_PREFIX}ar" LD="${ARM_NONE_EABI_GCC_PREFIX}ld" CFLAGS='-std=c99 -Werror -Wall -Wextra -O1' lib
 
     msg "size: ${ARM_NONE_EABI_GCC_PREFIX}gcc -O1, baremetal+debug"
-    ${ARM_NONE_EABI_GCC_PREFIX}size library/*.o
+    ${ARM_NONE_EABI_GCC_PREFIX}size -t library/*.o
 }
 
 component_build_arm_linux_gnueabi_gcc_arm5vte () {
@@ -3850,7 +3862,7 @@ component_build_arm_linux_gnueabi_gcc_arm5vte () {
     make CC="${ARM_LINUX_GNUEABI_GCC_PREFIX}gcc" AR="${ARM_LINUX_GNUEABI_GCC_PREFIX}ar" CFLAGS='-Werror -Wall -Wextra -march=armv5te -O1' LDFLAGS='-march=armv5te'
 
     msg "size: ${ARM_LINUX_GNUEABI_GCC_PREFIX}gcc -march=armv5te -O1, baremetal+debug"
-    ${ARM_LINUX_GNUEABI_GCC_PREFIX}size library/*.o
+    ${ARM_LINUX_GNUEABI_GCC_PREFIX}size -t library/*.o
 }
 support_build_arm_linux_gnueabi_gcc_arm5vte () {
     type ${ARM_LINUX_GNUEABI_GCC_PREFIX}gcc >/dev/null 2>&1
@@ -3865,7 +3877,7 @@ component_build_arm_none_eabi_gcc_arm5vte () {
     make CC="${ARM_NONE_EABI_GCC_PREFIX}gcc" AR="${ARM_NONE_EABI_GCC_PREFIX}ar" CFLAGS='-std=c99 -Werror -Wall -Wextra -march=armv5te -O1' LDFLAGS='-march=armv5te' SHELL='sh -x' lib
 
     msg "size: ${ARM_NONE_EABI_GCC_PREFIX}gcc -march=armv5te -O1, baremetal+debug"
-    ${ARM_NONE_EABI_GCC_PREFIX}size library/*.o
+    ${ARM_NONE_EABI_GCC_PREFIX}size -t library/*.o
 }
 
 component_build_arm_none_eabi_gcc_m0plus () {
@@ -3874,7 +3886,7 @@ component_build_arm_none_eabi_gcc_m0plus () {
     make CC="${ARM_NONE_EABI_GCC_PREFIX}gcc" AR="${ARM_NONE_EABI_GCC_PREFIX}ar" LD="${ARM_NONE_EABI_GCC_PREFIX}ld" CFLAGS='-std=c99 -Werror -Wall -Wextra -mthumb -mcpu=cortex-m0plus -Os' lib
 
     msg "size: ${ARM_NONE_EABI_GCC_PREFIX}gcc -mthumb -mcpu=cortex-m0plus -Os, baremetal_size"
-    ${ARM_NONE_EABI_GCC_PREFIX}size library/*.o
+    ${ARM_NONE_EABI_GCC_PREFIX}size -t library/*.o
 }
 
 component_build_arm_none_eabi_gcc_no_udbl_division () {
@@ -3893,6 +3905,25 @@ component_build_arm_none_eabi_gcc_no_64bit_multiplication () {
     make CC="${ARM_NONE_EABI_GCC_PREFIX}gcc" AR="${ARM_NONE_EABI_GCC_PREFIX}ar" LD="${ARM_NONE_EABI_GCC_PREFIX}ld" CFLAGS='-std=c99 -Werror -O1 -march=armv6-m -mthumb' lib
     echo "Checking that software 64-bit multiplication is not required"
     not grep __aeabi_lmul library/*.o
+}
+
+component_build_arm_clang_thumb () {
+    # ~ 30s
+
+    scripts/config.py baremetal
+
+    msg "build: clang thumb 2, make"
+    make clean
+    make CC="clang" CFLAGS='-std=c99 -Werror -Os --target=arm-linux-gnueabihf -march=armv7-m -mthumb' lib
+
+    # Some Thumb 1 asm is sensitive to optimisation level, so test both -O0 and -Os
+    msg "build: clang thumb 1 -O0, make"
+    make clean
+    make CC="clang" CFLAGS='-std=c99 -Werror -O0 --target=arm-linux-gnueabihf -mcpu=arm1136j-s -mthumb' lib
+
+    msg "build: clang thumb 1 -Os, make"
+    make clean
+    make CC="clang" CFLAGS='-std=c99 -Werror -Os --target=arm-linux-gnueabihf -mcpu=arm1136j-s -mthumb' lib
 }
 
 component_build_armcc () {
@@ -3918,7 +3949,7 @@ component_build_armcc () {
 
     make clean
 
-    # Compile with -O1 since some Arm inline assembly is disabled for -O0.
+    # Compile mostly with -O1 since some Arm inline assembly is disabled for -O0.
 
     # ARM Compiler 6 - Target ARMv7-A
     armc6_build_test "-O1 --target=arm-arm-none-eabi -march=armv7-a"
@@ -3937,7 +3968,14 @@ component_build_armcc () {
 
     # ARM Compiler 6 - Target ARMv8.2-A - AArch64
     armc6_build_test "-O1 --target=aarch64-arm-none-eabi -march=armv8.2-a+crypto"
+
+    # ARM Compiler 6 - Target Cortex-M0 - no optimisation
+    armc6_build_test "-O0 --target=arm-arm-none-eabi -mcpu=cortex-m0"
+
+    # ARM Compiler 6 - Target Cortex-M0
+    armc6_build_test "-Os --target=arm-arm-none-eabi -mcpu=cortex-m0"
 }
+
 support_build_armcc () {
     armc5_cc="$ARMC5_BIN_DIR/armcc"
     armc6_cc="$ARMC6_BIN_DIR/armclang"
@@ -4419,6 +4457,7 @@ run_component () {
 
 # Preliminary setup
 pre_check_environment
+pre_parse_command_line_for_dirs "$@"
 pre_initialize_variables
 pre_parse_command_line "$@"
 
