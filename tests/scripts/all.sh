@@ -3337,6 +3337,76 @@ component_build_psa_accel_key_type_rsa_public_key() {
     make CC=gcc CFLAGS="$ASAN_CFLAGS -DPSA_CRYPTO_DRIVER_TEST -DMBEDTLS_PSA_ACCEL_KEY_TYPE_RSA_PUBLIC_KEY -I../tests/include -O2" LDFLAGS="$ASAN_CFLAGS"
 }
 
+
+support_build_tfm_armcc () {
+    armc6_cc="$ARMC6_BIN_DIR/armclang"
+    (check_tools "$armc6_cc" > /dev/null 2>&1)
+}
+
+component_build_tfm_armcc() {
+    # test the TF-M configuration can build cleanly with various warning flags enabled
+    cp configs/tfm_mbedcrypto_config_profile_medium.h include/mbedtls/mbedtls_config.h
+    cp configs/crypto_config_profile_medium.h         include/psa/crypto_config.h
+
+    msg "build: TF-M config, armclang armv7-m thumb2"
+    make clean
+    armc6_build_test "--target=arm-arm-none-eabi -march=armv7-m -mthumb -Os -std=c99 -Werror -Wall -Wextra -Wwrite-strings -Wpointer-arith -Wimplicit-fallthrough -Wshadow -Wvla -Wformat=2 -Wno-format-nonliteral -Wshadow -Wasm-operand-widths -Wunused"
+}
+
+component_build_tfm() {
+    # test the TF-M configuration can build cleanly with various warning flags enabled
+    cp configs/tfm_mbedcrypto_config_profile_medium.h include/mbedtls/mbedtls_config.h
+    cp configs/crypto_config_profile_medium.h         include/psa/crypto_config.h
+
+    msg "build: TF-M config, clang, armv7-m thumb2"
+    make lib CC="clang" CFLAGS="--target=arm-linux-gnueabihf -march=armv7-m -mthumb -Os -std=c99 -Werror -Wall -Wextra -Wwrite-strings -Wpointer-arith -Wimplicit-fallthrough -Wshadow -Wvla -Wformat=2 -Wno-format-nonliteral -Wshadow -Wasm-operand-widths -Wunused"
+
+    msg "build: TF-M config, gcc native build"
+    make clean
+    make lib CC="gcc" CFLAGS="-Os -std=c99 -Werror -Wall -Wextra -Wwrite-strings -Wpointer-arith -Wshadow -Wvla -Wformat=2 -Wno-format-nonliteral -Wshadow -Wformat-signedness -Wlogical-op"
+}
+
+component_build_aes_variations() { # ~45s
+    # aes.o has many #if defined(...) guards that intersect in complex ways.
+    # Test that all the combinations build cleanly. The most common issue is
+    # unused variables/functions, so ensure -Wunused is set.
+
+    msg "build: aes.o for all combinations of relevant config options"
+
+    for a in set unset; do
+    for b in set unset; do
+    for c in set unset; do
+    for d in set unset; do
+    for e in set unset; do
+    for f in set unset; do
+    for g in set unset; do
+        echo ./scripts/config.py $a MBEDTLS_AES_SETKEY_ENC_ALT
+        echo ./scripts/config.py $b MBEDTLS_AES_DECRYPT_ALT
+        echo ./scripts/config.py $c MBEDTLS_AES_ROM_TABLES
+        echo ./scripts/config.py $d MBEDTLS_AES_ENCRYPT_ALT
+        echo ./scripts/config.py $e MBEDTLS_AES_SETKEY_DEC_ALT
+        echo ./scripts/config.py $f MBEDTLS_AES_FEWER_TABLES
+        echo ./scripts/config.py $g MBEDTLS_PADLOCK_C
+
+        ./scripts/config.py $a MBEDTLS_AES_SETKEY_ENC_ALT
+        ./scripts/config.py $b MBEDTLS_AES_DECRYPT_ALT
+        ./scripts/config.py $c MBEDTLS_AES_ROM_TABLES
+        ./scripts/config.py $d MBEDTLS_AES_ENCRYPT_ALT
+        ./scripts/config.py $e MBEDTLS_AES_SETKEY_DEC_ALT
+        ./scripts/config.py $f MBEDTLS_AES_FEWER_TABLES
+        ./scripts/config.py $g MBEDTLS_PADLOCK_C
+
+        rm -f library/aes.o
+        make -C library aes.o CC="clang" CFLAGS="-O0 -std=c99 -Werror -Wall -Wextra -Wwrite-strings -Wpointer-arith -Wimplicit-fallthrough -Wshadow -Wvla -Wformat=2 -Wno-format-nonliteral -Wshadow -Wasm-operand-widths -Wunused"
+    done
+    done
+    done
+    done
+    done
+    done
+    done
+}
+
 component_test_no_platform () {
     # Full configuration build, without platform support, file IO and net sockets.
     # This should catch missing mbedtls_printf definitions, and by disabling file
@@ -4166,6 +4236,7 @@ component_test_tls13_only_psk () {
     scripts/config.py unset MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ENABLED
     scripts/config.py unset MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL_ENABLED
     scripts/config.py unset MBEDTLS_ECDH_C
+    scripts/config.py unset MBEDTLS_DHM_C
     scripts/config.py unset MBEDTLS_X509_CRT_PARSE_C
     scripts/config.py unset MBEDTLS_X509_RSASSA_PSS_SUPPORT
     scripts/config.py unset MBEDTLS_SSL_SERVER_NAME_INDICATION
@@ -4196,6 +4267,22 @@ component_test_tls13_only_ephemeral () {
     tests/ssl-opt.sh
 }
 
+component_test_tls13_only_ephemeral_ffdh () {
+    msg "build: TLS 1.3 only from default, only ephemeral ffdh key exchange mode"
+    scripts/config.py unset MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ENABLED
+    scripts/config.py unset MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_EPHEMERAL_ENABLED
+    scripts/config.py unset MBEDTLS_SSL_EARLY_DATA
+    scripts/config.py unset MBEDTLS_ECDH_C
+
+    make CFLAGS="'-DMBEDTLS_USER_CONFIG_FILE=\"../tests/configs/tls13-only.h\"'"
+
+    msg "test_suite_ssl: TLS 1.3 only, only ephemeral ffdh key exchange mode"
+    cd tests; ./test_suite_ssl; cd ..
+
+    msg "ssl-opt.sh: TLS 1.3 only, only ephemeral ffdh key exchange mode"
+    tests/ssl-opt.sh
+}
+
 component_test_tls13_only_psk_ephemeral () {
     msg "build: TLS 1.3 only from default, only PSK ephemeral key exchange mode"
     scripts/config.py unset MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ENABLED
@@ -4213,6 +4300,27 @@ component_test_tls13_only_psk_ephemeral () {
     cd tests; ./test_suite_ssl; cd ..
 
     msg "ssl-opt.sh: TLS 1.3 only, only PSK ephemeral key exchange mode"
+    tests/ssl-opt.sh
+}
+
+component_test_tls13_only_psk_ephemeral_ffdh () {
+    msg "build: TLS 1.3 only from default, only PSK ephemeral ffdh key exchange mode"
+    scripts/config.py unset MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ENABLED
+    scripts/config.py unset MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ENABLED
+    scripts/config.py unset MBEDTLS_X509_CRT_PARSE_C
+    scripts/config.py unset MBEDTLS_X509_RSASSA_PSS_SUPPORT
+    scripts/config.py unset MBEDTLS_SSL_SERVER_NAME_INDICATION
+    scripts/config.py unset MBEDTLS_ECDSA_C
+    scripts/config.py unset MBEDTLS_PKCS1_V21
+    scripts/config.py unset MBEDTLS_PKCS7_C
+    scripts/config.py set   MBEDTLS_SSL_EARLY_DATA
+    scripts/config.py unset MBEDTLS_ECDH_C
+    make CFLAGS="'-DMBEDTLS_USER_CONFIG_FILE=\"../tests/configs/tls13-only.h\"'"
+
+    msg "test_suite_ssl: TLS 1.3 only, only PSK ephemeral ffdh key exchange mode"
+    cd tests; ./test_suite_ssl; cd ..
+
+    msg "ssl-opt.sh: TLS 1.3 only, only PSK ephemeral ffdh key exchange mode"
     tests/ssl-opt.sh
 }
 
