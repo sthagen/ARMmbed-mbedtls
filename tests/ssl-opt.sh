@@ -177,6 +177,9 @@ get_options() {
             -p|--preserve-logs)
                 PRESERVE_LOGS=1
                 ;;
+            --outcome-file)
+                shift; MBEDTLS_TEST_OUTCOME_FILE=$1
+                ;;
             --port)
                 shift; SRV_PORT=$1
                 ;;
@@ -199,14 +202,6 @@ get_options() {
         shift
     done
 }
-
-# Make the outcome file path relative to the original directory, not
-# to .../tests
-case "$MBEDTLS_TEST_OUTCOME_FILE" in
-    [!/]*)
-        MBEDTLS_TEST_OUTCOME_FILE="$ORIGINAL_PWD/$MBEDTLS_TEST_OUTCOME_FILE"
-        ;;
-esac
 
 # Read boolean configuration options from mbedtls_config.h for easy and quick
 # testing. Skip non-boolean options (with something other than spaces
@@ -1790,6 +1785,14 @@ cleanup() {
 #
 
 get_options "$@"
+
+# Make the outcome file path relative to the original directory, not
+# to .../tests
+case "$MBEDTLS_TEST_OUTCOME_FILE" in
+    [!/]*)
+        MBEDTLS_TEST_OUTCOME_FILE="$ORIGINAL_PWD/$MBEDTLS_TEST_OUTCOME_FILE"
+        ;;
+esac
 
 populate_enabled_hash_algs
 
@@ -13361,6 +13364,19 @@ run_test "TLS 1.3 m->G: AES_128_GCM_SHA256,ffdhe8192,rsa_pss_rsae_sha256" \
          -c "NamedGroup: ffdhe8192 ( 104 )" \
          -c "Verifying peer X.509 certificate... ok" \
          -C "received HelloRetryRequest message"
+
+requires_config_enabled MBEDTLS_SSL_PROTO_TLS1_3
+requires_config_enabled MBEDTLS_SSL_SRV_C
+requires_config_enabled MBEDTLS_SSL_CLI_C
+requires_config_enabled MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_PSK_ENABLED
+requires_config_enabled MBEDTLS_SSL_TLS1_3_KEY_EXCHANGE_MODE_EPHEMERAL_ENABLED
+run_test    "TLS 1.3: no HRR in case of PSK key exchange mode" \
+            "$P_SRV nbio=2 psk=010203 psk_identity=0a0b0c tls13_kex_modes=psk curves=none" \
+            "$P_CLI nbio=2 debug_level=3 psk=010203 psk_identity=0a0b0c tls13_kex_modes=all" \
+            0 \
+            -C "received HelloRetryRequest message" \
+            -c "Selected key exchange mode: psk$" \
+            -c "HTTP/1.0 200 OK"
 
 # Test heap memory usage after handshake
 requires_config_enabled MBEDTLS_SSL_PROTO_TLS1_2
