@@ -43,7 +43,7 @@
 
 #include "common.h"
 
-#if !defined(MBEDTLS_ECP_WITH_MPI_UINT)
+#if defined(MBEDTLS_ECP_WITH_MPI_UINT)
 
 /**
  * \brief Function level alternative implementation.
@@ -3280,14 +3280,16 @@ int mbedtls_ecp_read_key(mbedtls_ecp_group_id grp_id, mbedtls_ecp_keypair *key,
                 );
         }
     }
+
 #endif
 #if defined(MBEDTLS_ECP_SHORT_WEIERSTRASS_ENABLED)
     if (mbedtls_ecp_get_type(&key->grp) == MBEDTLS_ECP_TYPE_SHORT_WEIERSTRASS) {
         MBEDTLS_MPI_CHK(mbedtls_mpi_read_binary(&key->d, buf, buflen));
-    }
-#endif
-    MBEDTLS_MPI_CHK(mbedtls_ecp_check_privkey(&key->grp, &key->d));
 
+        MBEDTLS_MPI_CHK(mbedtls_ecp_check_privkey(&key->grp, &key->d));
+    }
+
+#endif
 cleanup:
 
     if (ret != 0) {
@@ -3641,7 +3643,7 @@ cleanup:
 MBEDTLS_STATIC_TESTABLE
 mbedtls_ecp_variant mbedtls_ecp_get_variant()
 {
-    return MBEDTLS_ECP_VARIANT_WITH_MPI_STRUCT;
+    return MBEDTLS_ECP_VARIANT_WITH_MPI_UINT;
 }
 
 #endif /* MBEDTLS_TEST_HOOKS */
