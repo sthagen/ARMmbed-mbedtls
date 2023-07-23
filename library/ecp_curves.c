@@ -44,15 +44,15 @@
 #define ECP_VALIDATE(cond)        \
     MBEDTLS_INTERNAL_VALIDATE(cond)
 
-#define ECP_MPI_INIT(s, n, p) { s, (n), (mbedtls_mpi_uint *) (p) }
+#define ECP_MPI_INIT(_p, _n) { .p = (mbedtls_mpi_uint *) (_p), .s = 1, .n = (_n) }
 
 #define ECP_MPI_INIT_ARRAY(x)   \
-    ECP_MPI_INIT(1, sizeof(x) / sizeof(mbedtls_mpi_uint), x)
+    ECP_MPI_INIT(x, sizeof(x) / sizeof(mbedtls_mpi_uint))
 
 #define ECP_POINT_INIT_XY_Z0(x, y) { \
-        ECP_MPI_INIT_ARRAY(x), ECP_MPI_INIT_ARRAY(y), ECP_MPI_INIT(1, 0, NULL) }
+        ECP_MPI_INIT_ARRAY(x), ECP_MPI_INIT_ARRAY(y), ECP_MPI_INIT(NULL, 0) }
 #define ECP_POINT_INIT_XY_Z1(x, y) { \
-        ECP_MPI_INIT_ARRAY(x), ECP_MPI_INIT_ARRAY(y), ECP_MPI_INIT(1, 1, mpi_one) }
+        ECP_MPI_INIT_ARRAY(x), ECP_MPI_INIT_ARRAY(y), ECP_MPI_INIT(mpi_one, 1) }
 
 #if defined(MBEDTLS_ECP_DP_SECP192R1_ENABLED) ||   \
     defined(MBEDTLS_ECP_DP_SECP224R1_ENABLED) ||   \
@@ -4512,12 +4512,13 @@ static const mbedtls_ecp_point brainpoolP512r1_T[32] = {
     defined(MBEDTLS_ECP_DP_CURVE448_ENABLED)
 /*
  * Create an MPI from embedded constants
- * (assumes len is an exact multiple of sizeof(mbedtls_mpi_uint))
+ * (assumes len is an exact multiple of sizeof(mbedtls_mpi_uint) and
+ * len < 1048576)
  */
 static inline void ecp_mpi_load(mbedtls_mpi *X, const mbedtls_mpi_uint *p, size_t len)
 {
     X->s = 1;
-    X->n = len / sizeof(mbedtls_mpi_uint);
+    X->n = (unsigned short) (len / sizeof(mbedtls_mpi_uint));
     X->p = (mbedtls_mpi_uint *) p;
 }
 #endif
@@ -5657,6 +5658,7 @@ static inline int ecp_mod_koblitz(mbedtls_mpi_uint *X,
     size_t shift   = bits % biL;
     size_t adjust  = (shift + biL - 1) / biL;
     size_t P_limbs = bits / biL + adjust;
+    mbedtls_mpi_uint mask = 0;
 
     mbedtls_mpi_uint *A1 = mbedtls_calloc(P_limbs, ciL);
     if (A1 == NULL) {
@@ -5672,7 +5674,6 @@ static inline int ecp_mod_koblitz(mbedtls_mpi_uint *X,
         goto cleanup;
     }
 
-    mbedtls_mpi_uint mask = 0;
     if (adjust != 0) {
         mask  = ((mbedtls_mpi_uint) 1 << shift) - 1;
     }
