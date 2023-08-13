@@ -126,9 +126,9 @@ int psa_can_do_hash(psa_algorithm_t hash_alg)
     (void) hash_alg;
     return global_data.drivers_initialized;
 }
-#if defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_LEGACY) ||       \
+#if defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_IMPORT) ||       \
     defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_PUBLIC_KEY) ||     \
-    defined(MBEDTLS_PSA_WANT_KEY_TYPE_DH_KEY_PAIR_LEGACY)
+    defined(PSA_WANT_KEY_TYPE_DH_KEY_PAIR_GENERATE)
 static int psa_is_dh_key_size_valid(size_t bits)
 {
     if (bits != 2048 && bits != 3072 && bits != 4096 &&
@@ -138,9 +138,9 @@ static int psa_is_dh_key_size_valid(size_t bits)
 
     return 1;
 }
-#endif /* MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_LEGACY ||
+#endif /* MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_IMPORT ||
           MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_PUBLIC_KEY ||
-          MBEDTLS_PSA_WANT_KEY_TYPE_DH_KEY_PAIR_LEGACY */
+          PSA_WANT_KEY_TYPE_DH_KEY_PAIR_GENERATE */
 
 psa_status_t mbedtls_to_psa_error(int ret)
 {
@@ -686,7 +686,7 @@ psa_status_t psa_import_key_into_slot(
 
         return PSA_SUCCESS;
     } else if (PSA_KEY_TYPE_IS_ASYMMETRIC(type)) {
-#if defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_LEGACY) || \
+#if defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_IMPORT) || \
         defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_PUBLIC_KEY)
         if (PSA_KEY_TYPE_IS_DH(type)) {
             if (psa_is_dh_key_size_valid(PSA_BYTES_TO_BITS(data_length)) == 0) {
@@ -698,7 +698,7 @@ psa_status_t psa_import_key_into_slot(
                                                key_buffer_length,
                                                bits);
         }
-#endif /* defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_LEGACY) ||
+#endif /* defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_IMPORT) ||
         * defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_PUBLIC_KEY) */
 #if defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_ECC_KEY_PAIR_IMPORT) || \
         defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_ECC_PUBLIC_KEY)
@@ -1089,13 +1089,10 @@ static psa_status_t psa_get_and_lock_transparent_key_slot_with_policy(
 
 psa_status_t psa_remove_key_data_from_memory(psa_key_slot_t *slot)
 {
-    /* Data pointer will always be either a valid pointer or NULL in an
-     * initialized slot, so we can just free it. */
     if (slot->key.data != NULL) {
-        mbedtls_platform_zeroize(slot->key.data, slot->key.bytes);
+        mbedtls_zeroize_and_free(slot->key.data, slot->key.bytes);
     }
 
-    mbedtls_free(slot->key.data);
     slot->key.data = NULL;
     slot->key.bytes = 0;
 
@@ -1509,7 +1506,7 @@ psa_status_t psa_export_public_key_internal(
 #endif /* defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_ECC_KEY_PAIR_EXPORT) ||
         * defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_ECC_PUBLIC_KEY) */
     } else if (PSA_KEY_TYPE_IS_DH(type)) {
-#if defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_LEGACY) || \
+#if defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_EXPORT) || \
         defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_PUBLIC_KEY)
         return mbedtls_psa_ffdh_export_public_key(attributes,
                                                   key_buffer,
@@ -1518,7 +1515,7 @@ psa_status_t psa_export_public_key_internal(
                                                   data_length);
 #else
         return PSA_ERROR_NOT_SUPPORTED;
-#endif /* defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_LEGACY) ||
+#endif /* defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_EXPORT) ||
         * defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_PUBLIC_KEY) */
     } else {
         (void) key_buffer;
@@ -5164,27 +5161,23 @@ psa_status_t psa_key_derivation_abort(psa_key_derivation_operation_t *operation)
         /* TLS-1.2 PSK-to-MS KDF uses the same core as TLS-1.2 PRF */
         PSA_ALG_IS_TLS12_PSK_TO_MS(kdf_alg)) {
         if (operation->ctx.tls12_prf.secret != NULL) {
-            mbedtls_platform_zeroize(operation->ctx.tls12_prf.secret,
+            mbedtls_zeroize_and_free(operation->ctx.tls12_prf.secret,
                                      operation->ctx.tls12_prf.secret_length);
-            mbedtls_free(operation->ctx.tls12_prf.secret);
         }
 
         if (operation->ctx.tls12_prf.seed != NULL) {
-            mbedtls_platform_zeroize(operation->ctx.tls12_prf.seed,
+            mbedtls_zeroize_and_free(operation->ctx.tls12_prf.seed,
                                      operation->ctx.tls12_prf.seed_length);
-            mbedtls_free(operation->ctx.tls12_prf.seed);
         }
 
         if (operation->ctx.tls12_prf.label != NULL) {
-            mbedtls_platform_zeroize(operation->ctx.tls12_prf.label,
+            mbedtls_zeroize_and_free(operation->ctx.tls12_prf.label,
                                      operation->ctx.tls12_prf.label_length);
-            mbedtls_free(operation->ctx.tls12_prf.label);
         }
 #if defined(MBEDTLS_PSA_BUILTIN_ALG_TLS12_PSK_TO_MS)
         if (operation->ctx.tls12_prf.other_secret != NULL) {
-            mbedtls_platform_zeroize(operation->ctx.tls12_prf.other_secret,
+            mbedtls_zeroize_and_free(operation->ctx.tls12_prf.other_secret,
                                      operation->ctx.tls12_prf.other_secret_length);
-            mbedtls_free(operation->ctx.tls12_prf.other_secret);
         }
 #endif /* MBEDTLS_PSA_BUILTIN_ALG_TLS12_PSK_TO_MS */
         status = PSA_SUCCESS;
@@ -5203,9 +5196,8 @@ psa_status_t psa_key_derivation_abort(psa_key_derivation_operation_t *operation)
 #if defined(MBEDTLS_PSA_BUILTIN_ALG_PBKDF2_HMAC)
     if (PSA_ALG_IS_PBKDF2_HMAC(kdf_alg)) {
         if (operation->ctx.pbkdf2.salt != NULL) {
-            mbedtls_platform_zeroize(operation->ctx.pbkdf2.salt,
+            mbedtls_zeroize_and_free(operation->ctx.pbkdf2.salt,
                                      operation->ctx.pbkdf2.salt_length);
-            mbedtls_free(operation->ctx.pbkdf2.salt);
         }
 
         status = PSA_SUCCESS;
@@ -6568,8 +6560,7 @@ static psa_status_t psa_tls12_prf_psk_to_ms_set_key(
 
     status = psa_tls12_prf_set_key(prf, pms, cur - pms);
 
-    mbedtls_platform_zeroize(pms, pms_len);
-    mbedtls_free(pms);
+    mbedtls_zeroize_and_free(pms, pms_len);
     return status;
 }
 
@@ -7373,6 +7364,9 @@ static psa_status_t psa_validate_key_type_and_size_for_key_generation(
         if (bits > PSA_VENDOR_RSA_MAX_KEY_BITS) {
             return PSA_ERROR_NOT_SUPPORTED;
         }
+        if (bits < PSA_VENDOR_RSA_GENERATE_MIN_KEY_BITS) {
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
 
         /* Accept only byte-aligned keys, for the same reasons as
          * in psa_import_rsa_key(). */
@@ -7389,13 +7383,13 @@ static psa_status_t psa_validate_key_type_and_size_for_key_generation(
     } else
 #endif /* defined(PSA_WANT_KEY_TYPE_ECC_KEY_PAIR_GENERATE) */
 
-#if defined(MBEDTLS_PSA_WANT_KEY_TYPE_DH_KEY_PAIR_LEGACY)
+#if defined(PSA_WANT_KEY_TYPE_DH_KEY_PAIR_GENERATE)
     if (PSA_KEY_TYPE_IS_DH(type) && PSA_KEY_TYPE_IS_KEY_PAIR(type)) {
         if (psa_is_dh_key_size_valid(bits) == 0) {
             return PSA_ERROR_NOT_SUPPORTED;
         }
     } else
-#endif /* defined(MBEDTLS_PSA_WANT_KEY_TYPE_DH_KEY_PAIR_LEGACY) */
+#endif /* defined(PSA_WANT_KEY_TYPE_DH_KEY_PAIR_GENERATE) */
     {
         return PSA_ERROR_NOT_SUPPORTED;
     }
@@ -7446,14 +7440,14 @@ psa_status_t psa_generate_key_internal(
     } else
 #endif /* defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_ECC_KEY_PAIR_GENERATE) */
 
-#if defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_LEGACY)
+#if defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_GENERATE)
     if (PSA_KEY_TYPE_IS_DH(type) && PSA_KEY_TYPE_IS_KEY_PAIR(type)) {
         return mbedtls_psa_ffdh_generate_key(attributes,
                                              key_buffer,
                                              key_buffer_size,
                                              key_buffer_length);
     } else
-#endif /* defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_LEGACY) */
+#endif /* defined(MBEDTLS_PSA_BUILTIN_KEY_TYPE_DH_KEY_PAIR_GENERATE) */
     {
         (void) key_buffer_length;
         return PSA_ERROR_NOT_SUPPORTED;
@@ -8010,8 +8004,7 @@ static psa_status_t psa_pake_complete_inputs(
     status = psa_driver_wrapper_pake_setup(operation, &inputs);
 
     /* Driver is responsible for creating its own copy of the password. */
-    mbedtls_platform_zeroize(inputs.password, inputs.password_len);
-    mbedtls_free(inputs.password);
+    mbedtls_zeroize_and_free(inputs.password, inputs.password_len);
 
     /* User and peer are translated to role. */
     mbedtls_free(inputs.user);
@@ -8312,9 +8305,8 @@ psa_status_t psa_pake_abort(
 
     if (operation->stage == PSA_PAKE_OPERATION_STAGE_COLLECT_INPUTS) {
         if (operation->data.inputs.password != NULL) {
-            mbedtls_platform_zeroize(operation->data.inputs.password,
+            mbedtls_zeroize_and_free(operation->data.inputs.password,
                                      operation->data.inputs.password_len);
-            mbedtls_free(operation->data.inputs.password);
         }
         if (operation->data.inputs.user != NULL) {
             mbedtls_free(operation->data.inputs.user);

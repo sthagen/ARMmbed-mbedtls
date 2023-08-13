@@ -121,14 +121,7 @@ def tweak_key_pair_dependency(dep: str, usage: str):
     symbols according to the required usage.
     """
     ret_list = list()
-    # Note: this LEGACY replacement DH is temporary and it's going
-    # to be aligned with ECC one in #7773.
-    if dep.endswith('DH_KEY_PAIR'):
-        legacy = dep
-        legacy = re.sub(r'KEY_PAIR\Z', r'KEY_PAIR_LEGACY', legacy)
-        legacy = re.sub(r'PSA_WANT', r'MBEDTLS_PSA_WANT', legacy)
-        ret_list.append(legacy)
-    elif dep.endswith('KEY_PAIR'):
+    if dep.endswith('KEY_PAIR'):
         if usage == "BASIC":
             # BASIC automatically includes IMPORT and EXPORT for test purposes (see
             # config_psa.h).
@@ -347,9 +340,14 @@ class KeyGenerate:
         else:
             generate_dependencies = fix_key_pair_dependencies(import_dependencies, 'GENERATE')
         for bits in kt.sizes_to_test():
+            if kt.name == 'PSA_KEY_TYPE_RSA_KEY_PAIR':
+                size_dependency = "PSA_VENDOR_RSA_GENERATE_MIN_KEY_BITS <= " +  str(bits)
+                test_dependencies = generate_dependencies + [size_dependency]
+            else:
+                test_dependencies = generate_dependencies
             yield test_case_for_key_generation(
                 kt.expression, bits,
-                finish_family_dependencies(generate_dependencies, bits),
+                finish_family_dependencies(test_dependencies, bits),
                 str(bits),
                 result
             )

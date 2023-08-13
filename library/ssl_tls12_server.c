@@ -148,7 +148,8 @@ static int ssl_parse_renegotiation_info(mbedtls_ssl_context *ssl,
     return 0;
 }
 
-#if defined(MBEDTLS_PK_CAN_ECDH) || defined(MBEDTLS_PK_CAN_ECDSA_SOME) || \
+#if defined(MBEDTLS_KEY_EXCHANGE_SOME_ECDH_OR_ECDHE_1_2_ENABLED) || \
+    defined(MBEDTLS_PK_CAN_ECDSA_SOME) || \
     defined(MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED)
 /*
  * Function for parsing a supported groups (TLS 1.3) or supported elliptic
@@ -273,9 +274,10 @@ static int ssl_parse_supported_point_formats(mbedtls_ssl_context *ssl,
     while (list_size > 0) {
         if (p[0] == MBEDTLS_ECP_PF_UNCOMPRESSED ||
             p[0] == MBEDTLS_ECP_PF_COMPRESSED) {
-#if !defined(MBEDTLS_USE_PSA_CRYPTO) && defined(MBEDTLS_ECDH_C)
+#if !defined(MBEDTLS_USE_PSA_CRYPTO) && \
+            defined(MBEDTLS_KEY_EXCHANGE_SOME_ECDH_OR_ECDHE_1_2_ENABLED)
             ssl->handshake->ecdh_ctx.point_format = p[0];
-#endif /* !MBEDTLS_USE_PSA_CRYPTO && MBEDTLS_ECDH_C */
+#endif /* !MBEDTLS_USE_PSA_CRYPTO && MBEDTLS_KEY_EXCHANGE_SOME_ECDH_OR_ECDHE_1_2_ENABLED */
 #if !defined(MBEDTLS_USE_PSA_CRYPTO) &&                             \
             defined(MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED)
             mbedtls_ecjpake_set_point_format(&ssl->handshake->ecjpake_ctx,
@@ -291,8 +293,8 @@ static int ssl_parse_supported_point_formats(mbedtls_ssl_context *ssl,
 
     return 0;
 }
-#endif /* MBEDTLS_PK_CAN_ECDH || MBEDTLS_PK_CAN_ECDSA_SOME ||
-          MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED */
+#endif /* MBEDTLS_KEY_EXCHANGE_SOME_ECDH_OR_ECDHE_1_2_ENABLED ||
+          MBEDTLS_PK_CAN_ECDSA_SOME || MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED */
 
 #if defined(MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED)
 MBEDTLS_CHECK_RETURN_CRITICAL
@@ -835,7 +837,8 @@ static int ssl_ciphersuite_match(mbedtls_ssl_context *ssl, int suite_id,
 #endif
 
 
-#if defined(MBEDTLS_PK_CAN_ECDH) || defined(MBEDTLS_PK_CAN_ECDSA_SOME)
+#if defined(MBEDTLS_KEY_EXCHANGE_SOME_ECDH_OR_ECDHE_1_2_ENABLED) || \
+    defined(MBEDTLS_PK_CAN_ECDSA_SOME)
     if (mbedtls_ssl_ciphersuite_uses_ec(suite_info) &&
         (ssl->handshake->curves_tls_id == NULL ||
          ssl->handshake->curves_tls_id[0] == 0)) {
@@ -1379,7 +1382,8 @@ read_record_header:
                 break;
 #endif /* MBEDTLS_KEY_EXCHANGE_WITH_CERT_ENABLED */
 
-#if defined(MBEDTLS_PK_CAN_ECDH) || defined(MBEDTLS_PK_CAN_ECDSA_SOME) || \
+#if defined(MBEDTLS_KEY_EXCHANGE_SOME_ECDH_OR_ECDHE_1_2_ENABLED) || \
+                defined(MBEDTLS_PK_CAN_ECDSA_SOME) || \
                 defined(MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED)
             case MBEDTLS_TLS_EXT_SUPPORTED_GROUPS:
                 MBEDTLS_SSL_DEBUG_MSG(3, ("found supported elliptic curves extension"));
@@ -1399,8 +1403,8 @@ read_record_header:
                     return ret;
                 }
                 break;
-#endif /* MBEDTLS_PK_CAN_ECDH || MBEDTLS_PK_CAN_ECDSA_SOME ||
-          MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED */
+#endif /* MBEDTLS_KEY_EXCHANGE_SOME_ECDH_OR_ECDHE_1_2_ENABLED || \
+          MBEDTLS_PK_CAN_ECDSA_SOME || MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED */
 
 #if defined(MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED)
             case MBEDTLS_TLS_EXT_ECJPAKE_KKPP:
@@ -1893,8 +1897,8 @@ static void ssl_write_max_fragment_length_ext(mbedtls_ssl_context *ssl,
 }
 #endif /* MBEDTLS_SSL_MAX_FRAGMENT_LENGTH */
 
-#if defined(MBEDTLS_ECDH_C) || defined(MBEDTLS_ECDSA_C) || \
-    defined(MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED)
+#if defined(MBEDTLS_KEY_EXCHANGE_SOME_ECDH_OR_ECDHE_1_2_ENABLED) || \
+    defined(MBEDTLS_ECDSA_C) || defined(MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED)
 static void ssl_write_supported_point_formats_ext(mbedtls_ssl_context *ssl,
                                                   unsigned char *buf,
                                                   size_t *olen)
@@ -1921,7 +1925,8 @@ static void ssl_write_supported_point_formats_ext(mbedtls_ssl_context *ssl,
 
     *olen = 6;
 }
-#endif /* MBEDTLS_ECDH_C || MBEDTLS_ECDSA_C || MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED */
+#endif /* MBEDTLS_KEY_EXCHANGE_SOME_ECDH_OR_ECDHE_1_2_ENABLED || MBEDTLS_ECDSA_C ||
+          MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED */
 
 #if defined(MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED)
 static void ssl_write_ecjpake_kkpp_ext(mbedtls_ssl_context *ssl,
@@ -2350,8 +2355,8 @@ static int ssl_write_server_hello(mbedtls_ssl_context *ssl)
     ext_len += olen;
 #endif
 
-#if defined(MBEDTLS_ECDH_C) || defined(MBEDTLS_ECDSA_C) || \
-    defined(MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED)
+#if defined(MBEDTLS_KEY_EXCHANGE_SOME_ECDH_OR_ECDHE_1_2_ENABLED) || \
+    defined(MBEDTLS_ECDSA_C) || defined(MBEDTLS_KEY_EXCHANGE_ECJPAKE_ENABLED)
     const mbedtls_ssl_ciphersuite_t *suite =
         mbedtls_ssl_ciphersuite_from_id(ssl->session_negotiate->ciphersuite);
     if (suite != NULL && mbedtls_ssl_ciphersuite_uses_ec(suite)) {
@@ -2642,7 +2647,7 @@ static int ssl_get_ecdh_params_from_cert(mbedtls_ssl_context *ssl)
             }
 
             ssl->handshake->xxdh_psa_type = psa_get_key_type(&key_attributes);
-            ssl->handshake->xxdh_bits = psa_get_key_bits(&key_attributes);
+            ssl->handshake->xxdh_psa_bits = psa_get_key_bits(&key_attributes);
 
             psa_reset_key_attributes(&key_attributes);
 
@@ -2666,7 +2671,7 @@ static int ssl_get_ecdh_params_from_cert(mbedtls_ssl_context *ssl)
             /* If the above conversion to TLS ID was fine, then also this one will
                be, so there is no need to check the return value here */
             mbedtls_ssl_get_psa_curve_info_from_tls_id(tls_id, &key_type,
-                                                       &ssl->handshake->xxdh_bits);
+                                                       &ssl->handshake->xxdh_psa_bits);
 
             ssl->handshake->xxdh_psa_type = key_type;
 
@@ -2675,7 +2680,7 @@ static int ssl_get_ecdh_params_from_cert(mbedtls_ssl_context *ssl)
             psa_set_key_algorithm(&key_attributes, PSA_ALG_ECDH);
             psa_set_key_type(&key_attributes,
                              PSA_KEY_TYPE_ECC_KEY_PAIR(ssl->handshake->xxdh_psa_type));
-            psa_set_key_bits(&key_attributes, ssl->handshake->xxdh_bits);
+            psa_set_key_bits(&key_attributes, ssl->handshake->xxdh_psa_bits);
 
             key_len = PSA_BITS_TO_BYTES(key->grp.pbits);
             ret = mbedtls_ecp_write_key(key, buf, key_len);
@@ -2983,13 +2988,13 @@ curve_matching_done:
             return MBEDTLS_ERR_SSL_ILLEGAL_PARAMETER;
         }
         handshake->xxdh_psa_type = key_type;
-        handshake->xxdh_bits = ec_bits;
+        handshake->xxdh_psa_bits = ec_bits;
 
         key_attributes = psa_key_attributes_init();
         psa_set_key_usage_flags(&key_attributes, PSA_KEY_USAGE_DERIVE);
         psa_set_key_algorithm(&key_attributes, PSA_ALG_ECDH);
         psa_set_key_type(&key_attributes, handshake->xxdh_psa_type);
-        psa_set_key_bits(&key_attributes, handshake->xxdh_bits);
+        psa_set_key_bits(&key_attributes, handshake->xxdh_psa_bits);
 
         /*
          * ECParameters curve_params
@@ -3501,9 +3506,8 @@ static int ssl_parse_encrypted_pms(mbedtls_ssl_context *ssl,
     unsigned char *pms = ssl->handshake->premaster + pms_offset;
     unsigned char ver[2];
     unsigned char fake_pms[48], peer_pms[48];
-    unsigned char mask;
-    size_t i, peer_pmslen;
-    unsigned int diff;
+    size_t peer_pmslen;
+    mbedtls_ct_condition_t diff;
 
     /* In case of a failure in decryption, the decryption may write less than
      * 2 bytes of output, but we always read the first two bytes. It doesn't
@@ -3532,13 +3536,10 @@ static int ssl_parse_encrypted_pms(mbedtls_ssl_context *ssl,
     /* Avoid data-dependent branches while checking for invalid
      * padding, to protect against timing-based Bleichenbacher-type
      * attacks. */
-    diff  = (unsigned int) ret;
-    diff |= peer_pmslen ^ 48;
-    diff |= peer_pms[0] ^ ver[0];
-    diff |= peer_pms[1] ^ ver[1];
-
-    /* mask = diff ? 0xff : 0x00 using bit operations to avoid branches */
-    mask = mbedtls_ct_uint_mask(diff);
+    diff = mbedtls_ct_bool(ret);
+    diff = mbedtls_ct_bool_or(diff, mbedtls_ct_uint_ne(peer_pmslen, 48));
+    diff = mbedtls_ct_bool_or(diff, mbedtls_ct_uint_ne(peer_pms[0], ver[0]));
+    diff = mbedtls_ct_bool_or(diff, mbedtls_ct_uint_ne(peer_pms[1], ver[1]));
 
     /*
      * Protection against Bleichenbacher's attack: invalid PKCS#1 v1.5 padding
@@ -3557,7 +3558,7 @@ static int ssl_parse_encrypted_pms(mbedtls_ssl_context *ssl,
     }
 
 #if defined(MBEDTLS_SSL_DEBUG_ALL)
-    if (diff != 0) {
+    if (diff != MBEDTLS_CT_FALSE) {
         MBEDTLS_SSL_DEBUG_MSG(1, ("bad client key exchange message"));
     }
 #endif
@@ -3571,9 +3572,7 @@ static int ssl_parse_encrypted_pms(mbedtls_ssl_context *ssl,
 
     /* Set pms to either the true or the fake PMS, without
      * data-dependent branches. */
-    for (i = 0; i < ssl->handshake->pmslen; i++) {
-        pms[i] = (mask & fake_pms[i]) | ((~mask) & peer_pms[i]);
-    }
+    mbedtls_ct_memcpy_if(diff, pms, fake_pms, peer_pms, ssl->handshake->pmslen);
 
     return 0;
 }
