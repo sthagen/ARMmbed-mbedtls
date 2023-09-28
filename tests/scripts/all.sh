@@ -1138,19 +1138,6 @@ component_test_full_cmake_gcc_asan () {
 
     msg "test: context-info.sh (full config, ASan build)" # ~ 15 sec
     tests/context-info.sh
-
-    msg "test: check direct ECP dependencies in TLS and X.509"
-    docs/architecture/psa-migration/syms.sh full
-
-    # TODO: replace "mbedtls_ecp_curve" with "mbedtls_ecp" also for
-    # "full-tls-external" once Issue6839 is completed
-    not grep mbedtls_ecp_curve full-libmbedtls-external
-    not grep mbedtls_ecp full-libmbedx509-external
-
-    rm  full-libmbedtls-external \
-        full-libmbedtls-modules \
-        full-libmbedx509-external \
-        full-libmbedx509-modules
 }
 
 
@@ -1175,19 +1162,6 @@ component_test_full_cmake_gcc_asan_new_bignum () {
 
     msg "test: context-info.sh (full config, ASan build)" # ~ 15 sec
     tests/context-info.sh
-
-    msg "test: check direct ECP dependencies in TLS and X.509"
-    docs/architecture/psa-migration/syms.sh full
-
-    # TODO: replace "mbedtls_ecp_curve" with "mbedtls_ecp" also for
-    # "full-tls-external" once Issue6839 is completed
-    not grep mbedtls_ecp_curve full-libmbedtls-external
-    not grep mbedtls_ecp full-libmbedx509-external
-
-    rm  full-libmbedtls-external \
-        full-libmbedtls-modules \
-        full-libmbedx509-external \
-        full-libmbedx509-modules
 }
 
 component_test_full_cmake_gcc_asan_new_bignum_test_hooks () {
@@ -3177,21 +3151,8 @@ component_test_tfm_config_p256m_driver_accel_ec () {
 
     common_tfm_config
 
-    # Set the list of accelerated components in order to remove them from
-    # builtin support.
-    loc_accel_list="ALG_ECDSA \
-                    ALG_ECDH \
-                    ECC_SECP_R1_256 \
-                    KEY_TYPE_ECC_KEY_PAIR_BASIC \
-                    KEY_TYPE_ECC_KEY_PAIR_IMPORT \
-                    KEY_TYPE_ECC_KEY_PAIR_EXPORT \
-                    KEY_TYPE_ECC_KEY_PAIR_GENERATE \
-                    KEY_TYPE_ECC_PUBLIC_KEY"
-    loc_accel_flags="$( echo "$loc_accel_list" | sed 's/[^ ]* */-DMBEDTLS_PSA_ACCEL_&/g' )"
-
     # Build crypto library specifying we want to use P256M code for EC operations
-    make CFLAGS="$ASAN_CFLAGS $loc_accel_flags -DMBEDTLS_PSA_P256M_DRIVER_ENABLED" LDFLAGS="$ASAN_CFLAGS"
-
+    make CFLAGS="$ASAN_CFLAGS -DMBEDTLS_PSA_P256M_DRIVER_ENABLED -I../tests/include/spe" LDFLAGS="$ASAN_CFLAGS"
 
     # Make sure any built-in EC alg was not re-enabled by accident (additive config)
     not grep mbedtls_ecdsa_ library/ecdsa.o
@@ -3215,7 +3176,7 @@ component_test_tfm_config() {
     common_tfm_config
 
     msg "build: TF-M config"
-    make tests
+    make CFLAGS='-Werror -Wall -Wextra -I../tests/include/spe' tests
 
     msg "test: TF-M config"
     make test
@@ -3975,7 +3936,7 @@ component_build_tfm_armcc() {
 
     msg "build: TF-M config, armclang armv7-m thumb2"
     make clean
-    armc6_build_test "--target=arm-arm-none-eabi -march=armv7-m -mthumb -Os -std=c99 -Werror -Wall -Wextra -Wwrite-strings -Wpointer-arith -Wimplicit-fallthrough -Wshadow -Wvla -Wformat=2 -Wno-format-nonliteral -Wshadow -Wasm-operand-widths -Wunused"
+    armc6_build_test "--target=arm-arm-none-eabi -march=armv7-m -mthumb -Os -std=c99 -Werror -Wall -Wextra -Wwrite-strings -Wpointer-arith -Wimplicit-fallthrough -Wshadow -Wvla -Wformat=2 -Wno-format-nonliteral -Wshadow -Wasm-operand-widths -Wunused -I../tests/include/spe"
 }
 
 component_build_tfm() {
@@ -3984,11 +3945,11 @@ component_build_tfm() {
     cp configs/crypto_config_profile_medium.h "$CRYPTO_CONFIG_H"
 
     msg "build: TF-M config, clang, armv7-m thumb2"
-    make lib CC="clang" CFLAGS="--target=arm-linux-gnueabihf -march=armv7-m -mthumb -Os -std=c99 -Werror -Wall -Wextra -Wwrite-strings -Wpointer-arith -Wimplicit-fallthrough -Wshadow -Wvla -Wformat=2 -Wno-format-nonliteral -Wshadow -Wasm-operand-widths -Wunused"
+    make lib CC="clang" CFLAGS="--target=arm-linux-gnueabihf -march=armv7-m -mthumb -Os -std=c99 -Werror -Wall -Wextra -Wwrite-strings -Wpointer-arith -Wimplicit-fallthrough -Wshadow -Wvla -Wformat=2 -Wno-format-nonliteral -Wshadow -Wasm-operand-widths -Wunused -I../tests/include/spe"
 
     msg "build: TF-M config, gcc native build"
     make clean
-    make lib CC="gcc" CFLAGS="-Os -std=c99 -Werror -Wall -Wextra -Wwrite-strings -Wpointer-arith -Wshadow -Wvla -Wformat=2 -Wno-format-nonliteral -Wshadow -Wformat-signedness -Wlogical-op"
+    make lib CC="gcc" CFLAGS="-Os -std=c99 -Werror -Wall -Wextra -Wwrite-strings -Wpointer-arith -Wshadow -Wvla -Wformat=2 -Wno-format-nonliteral -Wshadow -Wformat-signedness -Wlogical-op -I../tests/include/spe"
 }
 
 component_build_aes_variations() { # ~45s
@@ -5295,11 +5256,16 @@ support_test_cmake_out_of_source () {
 }
 
 component_test_cmake_out_of_source () {
+    # Remove existing generated files so that we use the ones cmake
+    # generates
+    make neat
+
     msg "build: cmake 'out-of-source' build"
     MBEDTLS_ROOT_DIR="$PWD"
     mkdir "$OUT_OF_SOURCE_DIR"
     cd "$OUT_OF_SOURCE_DIR"
-    cmake -D CMAKE_BUILD_TYPE:String=Check "$MBEDTLS_ROOT_DIR"
+    # Note: Explicitly generate files as these are turned off in releases
+    cmake -D CMAKE_BUILD_TYPE:String=Check -D GEN_FILES=ON "$MBEDTLS_ROOT_DIR"
     make
 
     msg "test: cmake 'out-of-source' build"
@@ -5320,9 +5286,14 @@ component_test_cmake_out_of_source () {
 }
 
 component_test_cmake_as_subdirectory () {
+    # Remove existing generated files so that we use the ones CMake
+    # generates
+    make neat
+
     msg "build: cmake 'as-subdirectory' build"
     cd programs/test/cmake_subproject
-    cmake .
+    # Note: Explicitly generate files as these are turned off in releases
+    cmake -D GEN_FILES=ON .
     make
     ./cmake_subproject
 }
@@ -5331,6 +5302,10 @@ support_test_cmake_as_subdirectory () {
 }
 
 component_test_cmake_as_package () {
+    # Remove existing generated files so that we use the ones CMake
+    # generates
+    make neat
+
     msg "build: cmake 'as-package' build"
     cd programs/test/cmake_package
     cmake .
@@ -5342,6 +5317,10 @@ support_test_cmake_as_package () {
 }
 
 component_test_cmake_as_package_install () {
+    # Remove existing generated files so that we use the ones CMake
+    # generates
+    make neat
+
     msg "build: cmake 'as-installed-package' build"
     cd programs/test/cmake_package_install
     cmake .
