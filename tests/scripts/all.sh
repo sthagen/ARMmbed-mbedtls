@@ -3628,6 +3628,12 @@ component_test_psa_crypto_config_accel_aead () {
 # - component_test_psa_crypto_config_accel_cipher_aead
 # - component_test_psa_crypto_config_reference_cipher_aead
 common_psa_crypto_config_accel_cipher_aead() {
+    # Start from the full config
+    helper_libtestdriver1_adjust_config "full"
+
+    # For time being, we don't support SSL module.
+    scripts/config.py unset MBEDTLS_SSL_TLS_C
+
     scripts/config.py unset MBEDTLS_CTR_DRBG_C
     scripts/config.py unset MBEDTLS_NIST_KW_C
 }
@@ -3647,9 +3653,6 @@ component_test_psa_crypto_config_accel_cipher_aead () {
 
     # Configure
     # ---------
-
-    # Start from the crypto config (no X509 and TLS)
-    helper_libtestdriver1_adjust_config "crypto_full"
 
     common_psa_crypto_config_accel_cipher_aead
 
@@ -3695,8 +3698,6 @@ component_test_psa_crypto_config_accel_cipher_aead () {
 }
 
 component_test_psa_crypto_config_reference_cipher_aead () {
-    helper_libtestdriver1_adjust_config "crypto_full"
-
     common_psa_crypto_config_accel_cipher_aead
 
     msg "test: crypto config with non-accelerated cipher and AEAD"
@@ -4124,23 +4125,14 @@ component_test_no_platform () {
     # This should catch missing mbedtls_printf definitions, and by disabling file
     # IO, it should catch missing '#include <stdio.h>'
     msg "build: full config except platform/fsio/net, make, gcc, C99" # ~ 30s
-    scripts/config.py full
+    scripts/config.py full_no_platform
     scripts/config.py unset MBEDTLS_PLATFORM_C
     scripts/config.py unset MBEDTLS_NET_C
-    scripts/config.py unset MBEDTLS_PLATFORM_MEMORY
-    scripts/config.py unset MBEDTLS_PLATFORM_PRINTF_ALT
-    scripts/config.py unset MBEDTLS_PLATFORM_FPRINTF_ALT
-    scripts/config.py unset MBEDTLS_PLATFORM_SNPRINTF_ALT
-    scripts/config.py unset MBEDTLS_PLATFORM_VSNPRINTF_ALT
-    scripts/config.py unset MBEDTLS_PLATFORM_TIME_ALT
-    scripts/config.py unset MBEDTLS_PLATFORM_EXIT_ALT
-    scripts/config.py unset MBEDTLS_PLATFORM_SETBUF_ALT
-    scripts/config.py unset MBEDTLS_PLATFORM_NV_SEED_ALT
-    scripts/config.py unset MBEDTLS_ENTROPY_NV_SEED
     scripts/config.py unset MBEDTLS_FS_IO
     scripts/config.py unset MBEDTLS_PSA_CRYPTO_SE_C
     scripts/config.py unset MBEDTLS_PSA_CRYPTO_STORAGE_C
     scripts/config.py unset MBEDTLS_PSA_ITS_FILE_C
+    scripts/config.py unset MBEDTLS_ENTROPY_NV_SEED
     # Note, _DEFAULT_SOURCE needs to be defined for platforms using glibc version >2.19,
     # to re-enable platform integration features otherwise disabled in C99 builds
     make CC=gcc CFLAGS='-Werror -Wall -Wextra -std=c99 -pedantic -Os -D_DEFAULT_SOURCE' lib programs
