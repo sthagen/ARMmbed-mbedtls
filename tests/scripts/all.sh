@@ -1554,6 +1554,23 @@ component_test_sw_inet_pton () {
     make test
 }
 
+component_full_no_pkparse_pkwrite() {
+    msg "build: full without pkparse and pkwrite"
+
+    scripts/config.py crypto_full
+    scripts/config.py unset MBEDTLS_PK_PARSE_C
+    scripts/config.py unset MBEDTLS_PK_WRITE_C
+
+    make CFLAGS="$ASAN_CFLAGS" LDFLAGS="$ASAN_CFLAGS"
+
+    # Ensure that PK_[PARSE|WRITE]_C were not re-enabled accidentally (additive config).
+    not grep mbedtls_pk_parse_key library/pkparse.o
+    not grep mbedtls_pk_write_key_der library/pkwrite.o
+
+    msg "test: full without pkparse and pkwrite"
+    make test
+}
+
 component_test_crypto_full_md_light_only () {
     msg "build: crypto_full with only the light subset of MD"
     scripts/config.py crypto_full
@@ -4779,6 +4796,26 @@ component_test_aesni () { # ~ 60s
     ./programs/test/selftest aes | not grep -q "AES note: built-in implementation."
     grep -q "AES note: using AESNI" ./programs/test/selftest
     not grep -q "AES note: built-in implementation." ./programs/test/selftest
+}
+
+component_test_sha3_variations() {
+    msg "sha3 loop unroll variations"
+
+    # define minimal config sufficient to test SHA3
+    cat > include/mbedtls/mbedtls_config.h << END
+        #define MBEDTLS_SELF_TEST
+        #define MBEDTLS_SHA3_C
+END
+
+    msg "all loops unrolled"
+    make clean
+    make -C tests test_suite_shax CFLAGS="-DMBEDTLS_SHA3_THETA_UNROLL=1 -DMBEDTLS_SHA3_PI_UNROLL=1 -DMBEDTLS_SHA3_CHI_UNROLL=1 -DMBEDTLS_SHA3_RHO_UNROLL=1"
+    ./tests/test_suite_shax
+
+    msg "all loops rolled up"
+    make clean
+    make -C tests test_suite_shax CFLAGS="-DMBEDTLS_SHA3_THETA_UNROLL=0 -DMBEDTLS_SHA3_PI_UNROLL=0 -DMBEDTLS_SHA3_CHI_UNROLL=0 -DMBEDTLS_SHA3_RHO_UNROLL=0"
+    ./tests/test_suite_shax
 }
 
 support_test_aesni_m32() {
