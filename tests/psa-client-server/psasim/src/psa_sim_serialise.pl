@@ -105,6 +105,7 @@ if ($which eq "h") {
         }
     }
 
+    print define_server_serialize_reset(@types);
 } else {
     die("internal error - shouldn't happen");
 }
@@ -328,6 +329,12 @@ sub h_header
  * data types (e.g. int), types typedef'd to those, and even structures that
  * don't contain pointers.
  */
+
+/** Reset all operation slots.
+ *
+ * Should be called when all clients have disconnected.
+ */
+void psa_sim_serialize_reset(void);
 
 /** Return how much buffer space is needed by \c psasim_serialise_begin().
  *
@@ -724,6 +731,7 @@ sub c_header
  */
 
 #include "psa_sim_serialise.h"
+#include "util.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -788,6 +796,8 @@ sub define_operation_type_data_and_functions
 {
     my ($type) = @_;    # e.g. 'hash' rather than 'psa_hash_operation_t'
 
+    my $utype = ucfirst($type);
+
     return <<EOF;
 
 static psa_${type}_operation_t ${type}_operations[MAX_LIVE_HANDLES_PER_CLASS];
@@ -799,8 +809,7 @@ static ssize_t allocate_${type}_operation_slot(void)
 {
     psasim_client_handle_t handle = next_${type}_operation_handle++;
     if (next_${type}_operation_handle == 0) {      /* wrapped around */
-        fprintf(stderr, "MAX HASH HANDLES REACHED\\n");
-        exit(1);
+        FATAL("$utype operation handle wrapped");
     }
 
     for (ssize_t i = 0; i < MAX_LIVE_HANDLES_PER_CLASS; i++) {
@@ -809,6 +818,8 @@ static ssize_t allocate_${type}_operation_slot(void)
             return i;
         }
     }
+
+    ERROR("All slots are currently used. Unable to allocate a new one.");
 
     return -1;  /* all in use */
 }
@@ -822,7 +833,9 @@ static ssize_t find_${type}_slot_by_handle(psasim_client_handle_t handle)
         }
     }
 
-    return -1;  /* all in use */
+    ERROR("Unable to find slot by handle %u", handle);
+
+    return -1;  /* not found */
 }
 EOF
 }
@@ -903,6 +916,33 @@ int psasim_deserialise_begin(uint8_t **pos, size_t *remaining)
     *remaining -= sizeof(endian);
 
     return 1;
+}
+EOF
+}
+
+# Return the code for psa_sim_serialize_reset()
+sub define_server_serialize_reset
+{
+    my @types = @_;
+
+    my $code = <<EOF;
+
+void psa_sim_serialize_reset(void)
+{
+EOF
+
+    for my $type (@types) {
+        next unless $type =~ /^psa_(\w+_operation)_t$/;
+
+        my $what = $1;  # e.g. "hash_operation"
+
+        $code .= <<EOF;
+    memset(${what}_handles, 0, sizeof(${what}_handles));
+    memset(${what}s, 0, sizeof(${what}s));
+EOF
+    }
+
+    $code .= <<EOF;
 }
 EOF
 }
