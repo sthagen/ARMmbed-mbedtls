@@ -761,7 +761,7 @@ static const oid_md_alg_t oid_md_alg[] =
         MBEDTLS_MD_RIPEMD160,
     },
 #endif
-#if defined(MBEDTLS_MD_CAN_SHA3_224)
+#if defined(PSA_WANT_ALG_SHA3_224)
     {
         OID_DESCRIPTOR(MBEDTLS_OID_DIGEST_ALG_SHA3_224,    "id-sha3-224",    "SHA-3-224"),
         MBEDTLS_MD_SHA3_224,
@@ -773,7 +773,7 @@ static const oid_md_alg_t oid_md_alg[] =
         MBEDTLS_MD_SHA3_256,
     },
 #endif
-#if defined(MBEDTLS_MD_CAN_SHA3_384)
+#if defined(PSA_WANT_ALG_SHA3_384)
     {
         OID_DESCRIPTOR(MBEDTLS_OID_DIGEST_ALG_SHA3_384,    "id-sha3-384",    "SHA-3-384"),
         MBEDTLS_MD_SHA3_384,
@@ -839,24 +839,24 @@ static const oid_md_hmac_t oid_md_hmac[] =
         MBEDTLS_MD_SHA512,
     },
 #endif /* MBEDTLS_MD_CAN_SHA512 */
-#if defined(MBEDTLS_MD_CAN_SHA3_224)
+#if defined(PSA_WANT_ALG_SHA3_224)
     {
         OID_DESCRIPTOR(MBEDTLS_OID_HMAC_SHA3_224,    "hmacSHA3-224",    "HMAC-SHA3-224"),
         MBEDTLS_MD_SHA3_224,
     },
-#endif /* MBEDTLS_MD_CAN_SHA3_224 */
+#endif /* PSA_WANT_ALG_SHA3_224 */
 #if defined(PSA_WANT_ALG_SHA3_256)
     {
         OID_DESCRIPTOR(MBEDTLS_OID_HMAC_SHA3_256,    "hmacSHA3-256",    "HMAC-SHA3-256"),
         MBEDTLS_MD_SHA3_256,
     },
 #endif /* PSA_WANT_ALG_SHA3_256 */
-#if defined(MBEDTLS_MD_CAN_SHA3_384)
+#if defined(PSA_WANT_ALG_SHA3_384)
     {
         OID_DESCRIPTOR(MBEDTLS_OID_HMAC_SHA3_384,    "hmacSHA3-384",    "HMAC-SHA3-384"),
         MBEDTLS_MD_SHA3_384,
     },
-#endif /* MBEDTLS_MD_CAN_SHA3_384 */
+#endif /* PSA_WANT_ALG_SHA3_384 */
 #if defined(PSA_WANT_ALG_SHA3_512)
     {
         OID_DESCRIPTOR(MBEDTLS_OID_HMAC_SHA3_512,    "hmacSHA3-512",    "HMAC-SHA3-512"),
