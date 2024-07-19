@@ -379,12 +379,12 @@ typedef struct {
 static const oid_sig_alg_t oid_sig_alg[] =
 {
 #if defined(MBEDTLS_RSA_C)
-#if defined(MBEDTLS_MD_CAN_MD5)
+#if defined(PSA_WANT_ALG_MD5)
     {
         OID_DESCRIPTOR(MBEDTLS_OID_PKCS1_MD5,        "md5WithRSAEncryption",     "RSA with MD5"),
         MBEDTLS_MD_MD5,      MBEDTLS_PK_RSA,
     },
-#endif /* MBEDTLS_MD_CAN_MD5 */
+#endif /* PSA_WANT_ALG_MD5 */
 #if defined(MBEDTLS_MD_CAN_SHA1)
     {
         OID_DESCRIPTOR(MBEDTLS_OID_PKCS1_SHA1,       "sha-1WithRSAEncryption",   "RSA with SHA1"),
@@ -566,12 +566,12 @@ static const oid_ecp_grp_t oid_ecp_grp[] =
         MBEDTLS_ECP_DP_SECP384R1,
     },
 #endif /* MBEDTLS_ECP_HAVE_SECP384R1 */
-#if defined(MBEDTLS_ECP_HAVE_SECP521R1)
+#if defined(PSA_WANT_ECC_SECP_R1_521)
     {
         OID_DESCRIPTOR(MBEDTLS_OID_EC_GRP_SECP521R1, "secp521r1",    "secp521r1"),
         MBEDTLS_ECP_DP_SECP521R1,
     },
-#endif /* MBEDTLS_ECP_HAVE_SECP521R1 */
+#endif /* PSA_WANT_ECC_SECP_R1_521 */
 #if defined(PSA_WANT_ECC_SECP_K1_192)
     {
         OID_DESCRIPTOR(MBEDTLS_OID_EC_GRP_SECP192K1, "secp192k1",    "secp192k1"),
@@ -633,18 +633,18 @@ typedef struct {
 
 static const oid_ecp_grp_algid_t oid_ecp_grp_algid[] =
 {
-#if defined(MBEDTLS_ECP_HAVE_CURVE25519)
+#if defined(PSA_WANT_ECC_MONTGOMERY_255)
     {
         OID_DESCRIPTOR(MBEDTLS_OID_X25519,               "X25519",       "X25519"),
         MBEDTLS_ECP_DP_CURVE25519,
     },
-#endif /* MBEDTLS_ECP_HAVE_CURVE25519 */
-#if defined(MBEDTLS_ECP_HAVE_CURVE448)
+#endif /* PSA_WANT_ECC_MONTGOMERY_255 */
+#if defined(PSA_WANT_ECC_MONTGOMERY_448)
     {
         OID_DESCRIPTOR(MBEDTLS_OID_X448,                 "X448",         "X448"),
         MBEDTLS_ECP_DP_CURVE448,
     },
-#endif /* MBEDTLS_ECP_HAVE_CURVE448 */
+#endif /* PSA_WANT_ECC_MONTGOMERY_448 */
     {
         NULL_OID_DESCRIPTOR,
         MBEDTLS_ECP_DP_NONE,
@@ -719,7 +719,7 @@ typedef struct {
 
 static const oid_md_alg_t oid_md_alg[] =
 {
-#if defined(MBEDTLS_MD_CAN_MD5)
+#if defined(PSA_WANT_ALG_MD5)
     {
         OID_DESCRIPTOR(MBEDTLS_OID_DIGEST_ALG_MD5,       "id-md5",       "MD5"),
         MBEDTLS_MD_MD5,
