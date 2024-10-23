@@ -545,62 +545,31 @@ support_build_crypto_baremetal () {
 # depends.py family of tests
 component_test_depends_py_cipher_id () {
     msg "test/build: depends.py cipher_id (gcc)"
-    tests/scripts/depends.py cipher_id --unset-use-psa
+    tests/scripts/depends.py cipher_id
 }
 
 component_test_depends_py_cipher_chaining () {
     msg "test/build: depends.py cipher_chaining (gcc)"
-    tests/scripts/depends.py cipher_chaining --unset-use-psa
+    tests/scripts/depends.py cipher_chaining
 }
 
 component_test_depends_py_cipher_padding () {
     msg "test/build: depends.py cipher_padding (gcc)"
-    tests/scripts/depends.py cipher_padding --unset-use-psa
+    tests/scripts/depends.py cipher_padding
 }
 
 component_test_depends_py_curves () {
     msg "test/build: depends.py curves (gcc)"
-    tests/scripts/depends.py curves --unset-use-psa
+    tests/scripts/depends.py curves
 }
 
 component_test_depends_py_hashes () {
     msg "test/build: depends.py hashes (gcc)"
-    tests/scripts/depends.py hashes --unset-use-psa
+    tests/scripts/depends.py hashes
 }
 
 component_test_depends_py_pkalgs () {
     msg "test/build: depends.py pkalgs (gcc)"
-    tests/scripts/depends.py pkalgs --unset-use-psa
-}
-
-# PSA equivalents of the depends.py tests
-component_test_depends_py_cipher_id_psa () {
-    msg "test/build: depends.py cipher_id (gcc) with MBEDTLS_USE_PSA_CRYPTO defined"
-    tests/scripts/depends.py cipher_id
-}
-
-component_test_depends_py_cipher_chaining_psa () {
-    msg "test/build: depends.py cipher_chaining (gcc) with MBEDTLS_USE_PSA_CRYPTO defined"
-    tests/scripts/depends.py cipher_chaining
-}
-
-component_test_depends_py_cipher_padding_psa () {
-    msg "test/build: depends.py cipher_padding (gcc) with MBEDTLS_USE_PSA_CRYPTO defined"
-    tests/scripts/depends.py cipher_padding
-}
-
-component_test_depends_py_curves_psa () {
-    msg "test/build: depends.py curves (gcc) with MBEDTLS_USE_PSA_CRYPTO defined"
-    tests/scripts/depends.py curves
-}
-
-component_test_depends_py_hashes_psa () {
-    msg "test/build: depends.py hashes (gcc) with MBEDTLS_USE_PSA_CRYPTO defined"
-    tests/scripts/depends.py hashes
-}
-
-component_test_depends_py_pkalgs_psa () {
-    msg "test/build: depends.py pkalgs (gcc) with MBEDTLS_USE_PSA_CRYPTO defined"
     tests/scripts/depends.py pkalgs
 }
 
@@ -2392,12 +2361,12 @@ component_build_aes_aesce_armcc () {
     msg "AESCE, build with default configuration."
     scripts/config.py set MBEDTLS_AESCE_C
     scripts/config.py unset MBEDTLS_AES_USE_HARDWARE_ONLY
-    armc6_build_test "-O1 --target=aarch64-arm-none-eabi -march=armv8-a+crypto"
+    helper_armc6_build_test "-O1 --target=aarch64-arm-none-eabi -march=armv8-a+crypto"
 
     msg "AESCE, build AESCE only"
     scripts/config.py set MBEDTLS_AESCE_C
     scripts/config.py set MBEDTLS_AES_USE_HARDWARE_ONLY
-    armc6_build_test "-O1 --target=aarch64-arm-none-eabi -march=armv8-a+crypto"
+    helper_armc6_build_test "-O1 --target=aarch64-arm-none-eabi -march=armv8-a+crypto"
 }
 
 component_test_aes_only_128_bit_keys () {
@@ -2601,7 +2570,7 @@ component_test_block_cipher_no_decrypt_aesce_armcc () {
     # test AESCE baremetal build
     scripts/config.py set MBEDTLS_AESCE_C
     msg "build: default config + BLOCK_CIPHER_NO_DECRYPT with AESCE"
-    armc6_build_test "-O1 --target=aarch64-arm-none-eabi -march=armv8-a+crypto -Werror -Wall -Wextra"
+    helper_armc6_build_test "-O1 --target=aarch64-arm-none-eabi -march=armv8-a+crypto -Werror -Wall -Wextra"
 
     # Make sure we don't have mbedtls_xxx_setkey_dec in AES/ARIA/CAMELLIA
     not grep mbedtls_aes_setkey_dec ${BUILTIN_SRC_PATH}/aes.o
