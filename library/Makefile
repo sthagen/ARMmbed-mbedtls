@@ -6,7 +6,7 @@ TF_PSA_CRYPTO_CORE_PATH = $(MBEDTLS_PATH)/tf-psa-crypto/core
 TF_PSA_CRYPTO_DRIVERS_BUILTIN_SRC_PATH = $(MBEDTLS_PATH)/tf-psa-crypto/drivers/builtin/src
 
 GENERATED_FILES := \
-	$(TF_PSA_CRYPTO_DRIVERS_BUILTIN_SRC_PATH)/error.c \
+	error.c \
 	version_features.c \
 	ssl_debug_helpers_generated.c \
 	$(TF_PSA_CRYPTO_CORE_PATH)/psa_crypto_driver_wrappers.h \
@@ -148,7 +148,6 @@ OBJS_CRYPTO= \
 	     $(TF_PSA_CRYPTO_DRIVERS_BUILTIN_SRC_PATH)/ecp_curves_new.o \
 	     $(TF_PSA_CRYPTO_DRIVERS_BUILTIN_SRC_PATH)/entropy.o \
 	     $(TF_PSA_CRYPTO_DRIVERS_BUILTIN_SRC_PATH)/entropy_poll.o \
-	     $(TF_PSA_CRYPTO_DRIVERS_BUILTIN_SRC_PATH)/error.o \
 	     $(TF_PSA_CRYPTO_DRIVERS_BUILTIN_SRC_PATH)/gcm.o \
 	     $(TF_PSA_CRYPTO_DRIVERS_BUILTIN_SRC_PATH)/hkdf.o \
 	     $(TF_PSA_CRYPTO_DRIVERS_BUILTIN_SRC_PATH)/hmac_drbg.o \
@@ -206,6 +205,7 @@ OBJS_X509= \
 	   x509write_crt.o \
 	   x509write_csr.o \
 	   pkcs7.o \
+	   error.o \
 	   # This line is intentionally left blank
 
 OBJS_TLS= \
@@ -346,6 +346,10 @@ libmbedcrypto.dll: $(OBJS_CRYPTO)
 	echo "  CC    $<"
 	$(CC) $(LOCAL_CFLAGS) $(CFLAGS) -o $@ -c $<
 
+.c.s:
+	echo "  CC    $<"
+	$(CC) $(LOCAL_CFLAGS) $(CFLAGS) -S -o $@ -c $<
+
 .PHONY: generated_files
 generated_files: $(GENERATED_FILES)
 
@@ -357,10 +361,10 @@ else
 gen_file_dep = |
 endif
 
-$(TF_PSA_CRYPTO_DRIVERS_BUILTIN_SRC_PATH)/error.c: $(gen_file_dep) ../scripts/generate_errors.pl
-$(TF_PSA_CRYPTO_DRIVERS_BUILTIN_SRC_PATH)/error.c: $(gen_file_dep) ../scripts/data_files/error.fmt
-$(TF_PSA_CRYPTO_DRIVERS_BUILTIN_SRC_PATH)/error.c: $(gen_file_dep) $(filter-out %config%,$(wildcard ../include/mbedtls/*.h))
-$(TF_PSA_CRYPTO_DRIVERS_BUILTIN_SRC_PATH)/error.c:
+error.c: $(gen_file_dep) ../scripts/generate_errors.pl
+error.c: $(gen_file_dep) ../scripts/data_files/error.fmt
+error.c: $(gen_file_dep) $(filter-out %config%,$(wildcard ../include/mbedtls/*.h))
+error.c:
 	echo "  Gen   $@"
 	$(PERL) ../scripts/generate_errors.pl
 
@@ -396,10 +400,11 @@ $(TF_PSA_CRYPTO_CORE_PATH)/psa_crypto.o:$(TF_PSA_CRYPTO_CORE_PATH)/psa_crypto_dr
 
 clean:
 ifndef WINDOWS
-	rm -f *.o libmbed*
-	rm -f $(OBJS_CRYPTO)
+	rm -f *.o *.s libmbed*
+	rm -f $(OBJS_CRYPTO) $(OBJS_CRYPTO:.o=.s)
 else
 	if exist *.o del /Q /F *.o
+	if exist *.s del /Q /F *.s
 	if exist libmbed* del /Q /F libmbed*
 	del /Q /F del_errors_out_if_the_file_list_is_empty_but_not_if_a_file_does_not_exist $(subst /,\,$(OBJS_CRYPTO))
 endif
