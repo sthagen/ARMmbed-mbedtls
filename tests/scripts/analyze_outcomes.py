@@ -388,10 +388,6 @@ class DriverVSReference_ecp_light_only(outcome_analysis.DriverVSReference):
             re.compile(r'ECP point multiplication .*'),
             re.compile(r'ECP test vectors .*'),
         ],
-        'test_suite_ssl': [
-            # This deprecated function is only present when ECP_C is On.
-            'Test configuration of groups for DHE through mbedtls_ssl_conf_curves()',
-        ],
     }
 
 class DriverVSReference_no_ecp_at_all(outcome_analysis.DriverVSReference):
@@ -427,10 +423,6 @@ class DriverVSReference_no_ecp_at_all(outcome_analysis.DriverVSReference):
             # while checking driver's coverage.
             re.compile(r'Parse EC Key .*compressed\)'),
             re.compile(r'Parse Public EC Key .*compressed\)'),
-        ],
-        # See ecp_light_only
-        'test_suite_ssl': [
-            'Test configuration of groups for DHE through mbedtls_ssl_conf_curves()',
         ],
     }
 
@@ -475,10 +467,6 @@ class DriverVSReference_ecc_no_bignum(outcome_analysis.DriverVSReference):
         'test_suite_debug': [
             re.compile(r'Debug print mbedtls_mpi.*'),
         ],
-        # See ecp_light_only
-        'test_suite_ssl': [
-            'Test configuration of groups for DHE through mbedtls_ssl_conf_curves()',
-        ],
     }
 
 class DriverVSReference_ecc_ffdh_no_bignum(outcome_analysis.DriverVSReference):
@@ -493,17 +481,10 @@ class DriverVSReference_ecc_ffdh_no_bignum(outcome_analysis.DriverVSReference):
         'psa_crypto_ecp',
     ]
     IGNORED_TESTS = {
-        'ssl-opt': [
-            # DHE support in TLS 1.2 requires built-in MBEDTLS_DHM_C
-            # (because it needs custom groups, which PSA does not
-            # provide), even with MBEDTLS_USE_PSA_CRYPTO.
-            re.compile(r'PSK callback:.*\bdhe-psk\b.*'),
-        ],
         'test_suite_config': [
             re.compile(r'.*\bMBEDTLS_BIGNUM_C\b.*'),
             re.compile(r'.*\bMBEDTLS_DHM_C\b.*'),
             re.compile(r'.*\bMBEDTLS_(ECDH|ECDSA|ECJPAKE|ECP)_.*'),
-            re.compile(r'.*\bMBEDTLS_KEY_EXCHANGE_DHE_PSK_ENABLED\b.*'),
             re.compile(r'.*\bMBEDTLS_PK_PARSE_EC_COMPRESSED\b.*'),
         ],
         'test_suite_platform': [
@@ -529,10 +510,6 @@ class DriverVSReference_ecc_ffdh_no_bignum(outcome_analysis.DriverVSReference):
         ],
         'test_suite_debug': [
             re.compile(r'Debug print mbedtls_mpi.*'),
-        ],
-        # See ecp_light_only
-        'test_suite_ssl': [
-            'Test configuration of groups for DHE through mbedtls_ssl_conf_curves()',
         ],
     }
 

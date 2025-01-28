@@ -1154,48 +1154,6 @@ static int ssl_handshake_init(mbedtls_ssl_context *ssl)
     }
 #endif
 
-/*
- * curve_list is translated to IANA TLS group identifiers here because
- * mbedtls_ssl_conf_curves returns void and so can't return
- * any error codes.
- */
-#if defined(MBEDTLS_ECP_C)
-#if !defined(MBEDTLS_DEPRECATED_REMOVED)
-    /* Heap allocate and translate curve_list from internal to IANA group ids */
-    if (ssl->conf->curve_list != NULL) {
-        size_t length;
-        const mbedtls_ecp_group_id *curve_list = ssl->conf->curve_list;
-
-        for (length = 0;  (curve_list[length] != MBEDTLS_ECP_DP_NONE); length++) {
-        }
-
-        /* Leave room for zero termination */
-        uint16_t *group_list = mbedtls_calloc(length + 1, sizeof(uint16_t));
-        if (group_list == NULL) {
-            return MBEDTLS_ERR_SSL_ALLOC_FAILED;
-        }
-
-        for (size_t i = 0; i < length; i++) {
-            uint16_t tls_id = mbedtls_ssl_get_tls_id_from_ecp_group_id(
-                curve_list[i]);
-            if (tls_id == 0) {
-                mbedtls_free(group_list);
-                return MBEDTLS_ERR_SSL_BAD_CONFIG;
-            }
-            group_list[i] = tls_id;
-        }
-
-        group_list[length] = 0;
-
-        ssl->handshake->group_list = group_list;
-        ssl->handshake->group_list_heap_allocated = 1;
-    } else {
-        ssl->handshake->group_list = ssl->conf->group_list;
-        ssl->handshake->group_list_heap_allocated = 0;
-    }
-#endif /* MBEDTLS_DEPRECATED_REMOVED */
-#endif /* MBEDTLS_ECP_C */
-
 #if defined(MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED)
 #if !defined(MBEDTLS_DEPRECATED_REMOVED)
 #if defined(MBEDTLS_SSL_PROTO_TLS1_2)
@@ -2735,34 +2693,12 @@ void mbedtls_ssl_conf_sig_algs(mbedtls_ssl_config *conf,
 }
 #endif /* MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED */
 
-#if defined(MBEDTLS_ECP_C)
-#if !defined(MBEDTLS_DEPRECATED_REMOVED)
-/*
- * Set the allowed elliptic curves
- *
- * mbedtls_ssl_setup() takes the provided list
- * and translates it to a list of IANA TLS group identifiers,
- * stored in ssl->handshake->group_list.
- *
- */
-void mbedtls_ssl_conf_curves(mbedtls_ssl_config *conf,
-                             const mbedtls_ecp_group_id *curve_list)
-{
-    conf->curve_list = curve_list;
-    conf->group_list = NULL;
-}
-#endif /* MBEDTLS_DEPRECATED_REMOVED */
-#endif /* MBEDTLS_ECP_C */
-
 /*
  * Set the allowed groups
  */
 void mbedtls_ssl_conf_groups(mbedtls_ssl_config *conf,
                              const uint16_t *group_list)
 {
-#if defined(MBEDTLS_ECP_C) && !defined(MBEDTLS_DEPRECATED_REMOVED)
-    conf->curve_list = NULL;
-#endif
     conf->group_list = group_list;
 }
 
@@ -5594,7 +5530,7 @@ void mbedtls_ssl_config_init(mbedtls_ssl_config *conf)
 /* The selection should be the same as mbedtls_x509_crt_profile_default in
  * x509_crt.c, plus Montgomery curves for ECDHE. Here, the order matters:
  * curves with a lower resource usage come first.
- * See the documentation of mbedtls_ssl_conf_curves() for what we promise
+ * See the documentation of mbedtls_ssl_conf_groups() for what we promise
  * about this list.
  */
 static const uint16_t ssl_preset_default_groups[] = {
@@ -5983,9 +5919,6 @@ int mbedtls_ssl_config_defaults(mbedtls_ssl_config *conf,
             conf->sig_algs = ssl_preset_suiteb_sig_algs;
 #endif /* MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED */
 
-#if defined(MBEDTLS_ECP_C) && !defined(MBEDTLS_DEPRECATED_REMOVED)
-            conf->curve_list = NULL;
-#endif
             conf->group_list = ssl_preset_suiteb_groups;
             break;
 
@@ -6009,9 +5942,6 @@ int mbedtls_ssl_config_defaults(mbedtls_ssl_config *conf,
             conf->sig_algs = ssl_preset_default_sig_algs;
 #endif /* MBEDTLS_SSL_HANDSHAKE_WITH_CERT_ENABLED */
 
-#if defined(MBEDTLS_ECP_C) && !defined(MBEDTLS_DEPRECATED_REMOVED)
-            conf->curve_list = NULL;
-#endif
             conf->group_list = ssl_preset_default_groups;
 
 #if defined(MBEDTLS_DHM_C) && defined(MBEDTLS_SSL_CLI_C)
@@ -6189,7 +6119,7 @@ unsigned char mbedtls_ssl_hash_from_md_alg(int md)
  */
 int mbedtls_ssl_check_curve_tls_id(const mbedtls_ssl_context *ssl, uint16_t tls_id)
 {
-    const uint16_t *group_list = mbedtls_ssl_get_groups(ssl);
+    const uint16_t *group_list = ssl->conf->group_list;
 
     if (group_list == NULL) {
         return -1;
@@ -7025,7 +6955,6 @@ static int ssl_compute_master(mbedtls_ssl_handshake_params *handshake,
              * length of the other key.
              */
             case MBEDTLS_KEY_EXCHANGE_ECDHE_PSK:
-            case MBEDTLS_KEY_EXCHANGE_DHE_PSK:
                 other_secret_len = MBEDTLS_GET_UINT16_BE(handshake->premaster, 0);
                 other_secret = handshake->premaster + 2;
                 break;
@@ -7326,14 +7255,9 @@ int mbedtls_ssl_psk_derive_premaster(mbedtls_ssl_context *ssl, mbedtls_key_excha
         /*
          * This should never happen because the existence of a PSK is always
          * checked before calling this function.
-         *
-         * The exception is opaque DHE-PSK. For DHE-PSK fill premaster with
-         * the shared secret without PSK.
          */
-        if (key_ex != MBEDTLS_KEY_EXCHANGE_DHE_PSK) {
-            MBEDTLS_SSL_DEBUG_MSG(1, ("should never happen"));
-            return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
-        }
+        MBEDTLS_SSL_DEBUG_MSG(1, ("should never happen"));
+        return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
     }
 
     /*
@@ -7360,24 +7284,6 @@ int mbedtls_ssl_psk_derive_premaster(mbedtls_ssl_context *ssl, mbedtls_key_excha
         p += psk_len;
     } else
 #endif /* MBEDTLS_KEY_EXCHANGE_PSK_ENABLED */
-#if defined(MBEDTLS_KEY_EXCHANGE_DHE_PSK_ENABLED)
-    if (key_ex == MBEDTLS_KEY_EXCHANGE_DHE_PSK) {
-        int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
-        size_t len;
-
-        /* Write length only when we know the actual value */
-        if ((ret = mbedtls_dhm_calc_secret(&ssl->handshake->dhm_ctx,
-                                           p + 2, (size_t) (end - (p + 2)), &len,
-                                           ssl->conf->f_rng, ssl->conf->p_rng)) != 0) {
-            MBEDTLS_SSL_DEBUG_RET(1, "mbedtls_dhm_calc_secret", ret);
-            return ret;
-        }
-        MBEDTLS_PUT_UINT16_BE(len, p, 0);
-        p += 2 + len;
-
-        MBEDTLS_SSL_DEBUG_MPI(3, "DHM: K ", &ssl->handshake->dhm_ctx.K);
-    } else
-#endif /* MBEDTLS_KEY_EXCHANGE_DHE_PSK_ENABLED */
 #if defined(MBEDTLS_KEY_EXCHANGE_ECDHE_PSK_ENABLED)
     if (key_ex == MBEDTLS_KEY_EXCHANGE_ECDHE_PSK) {
         int ret = MBEDTLS_ERR_ERROR_CORRUPTION_DETECTED;
@@ -9686,7 +9592,6 @@ int mbedtls_ssl_check_cert_usage(const mbedtls_x509_crt *cert,
             /* Don't use default: we want warnings when adding new values */
             case MBEDTLS_KEY_EXCHANGE_NONE:
             case MBEDTLS_KEY_EXCHANGE_PSK:
-            case MBEDTLS_KEY_EXCHANGE_DHE_PSK:
             case MBEDTLS_KEY_EXCHANGE_ECDHE_PSK:
             case MBEDTLS_KEY_EXCHANGE_ECJPAKE:
                 usage = 0;
